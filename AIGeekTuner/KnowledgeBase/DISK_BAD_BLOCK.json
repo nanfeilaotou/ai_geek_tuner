@@ -1,0 +1,23 @@
+{
+  "Name": "DISK_BAD_BLOCK",
+  "Description": "磁盘坏块或存储 I/O 错误相关参考条目。系统日志出现 bad block 或 Disk 事件时，需要结合设备标识和厂商检测结果确认。",
+  "Keywords": [
+    "DISK_BAD_BLOCK",
+    "BAD BLOCK",
+    "BAD SECTOR",
+    "DISK",
+    "\\DEVICE\\HARDDISK",
+    "DISK ERROR"
+  ],
+  "CommonCauses": [
+    "存储介质存在不可可靠读取的区域",
+    "数据线、接口或存储控制器通信异常",
+    "存储驱动或固件异常"
+  ],
+  "VerificationSteps": [
+    "先备份重要数据并记录事件中的设备路径",
+    "读取设备 SMART 信息并运行厂商只读诊断",
+    "检查接口连接后再次观察是否出现相同 I/O 错误"
+  ],
+  "RiskLevel": "High"
+}

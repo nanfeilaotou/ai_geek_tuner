@@ -1,0 +1,21 @@
+{
+  "Name": "WHEA_UNCORRECTABLE_ERROR",
+  "Description": "Windows Hardware Error Architecture 报告的不可纠正硬件错误类别。该错误代码只能说明系统记录了硬件相关异常，不能单独确定具体部件。",
+  "Keywords": [
+    "WHEA_UNCORRECTABLE_ERROR",
+    "WHEA",
+    "0x00000124",
+    "0x124"
+  ],
+  "CommonCauses": [
+    "处理器、内存、总线或供电链路出现瞬时不稳定",
+    "驱动或固件与当前硬件配置不兼容",
+    "散热异常或非默认性能配置引起稳定性下降"
+  ],
+  "VerificationSteps": [
+    "查看 WHEA-Logger 事件中的 Error Source、APIC ID 和错误类型",
+    "恢复默认配置后复测并保存新的事件日志",
+    "分别运行处理器与内存稳定性测试，确认错误是否可重复"
+  ],
+  "RiskLevel": "High"
+}

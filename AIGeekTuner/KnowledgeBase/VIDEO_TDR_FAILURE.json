@@ -1,0 +1,24 @@
+{
+  "Name": "VIDEO_TDR_FAILURE",
+  "Description": "Windows 显示驱动超时检测与恢复失败相关错误。日志中的驱动模块名称可帮助定位显示栈，但不能单独证明显卡硬件损坏。",
+  "Keywords": [
+    "VIDEO_TDR_FAILURE",
+    "VIDEO_TDR",
+    "nvlddmkm",
+    "atikmpag",
+    "amdkmdag",
+    "0x00000116",
+    "0x116"
+  ],
+  "CommonCauses": [
+    "显示驱动异常或驱动版本兼容问题",
+    "图形负载下系统稳定性不足",
+    "应用程序、图形 API 或覆盖层冲突"
+  ],
+  "VerificationSteps": [
+    "保存发生故障时的显示驱动事件和应用日志",
+    "干净安装或回退到稳定版显示驱动后复测",
+    "在默认硬件配置下使用可重复的图形负载验证"
+  ],
+  "RiskLevel": "Medium"
+}

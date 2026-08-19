@@ -1,0 +1,16 @@
+.vs/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.log
+*.tmp
+TestResults/
+artifacts/
+
+# 本地开发辅助与课程过程资料
+/.agents/
+/tools/
+/*.docx
+/*.srt
+**/AGENTS.md

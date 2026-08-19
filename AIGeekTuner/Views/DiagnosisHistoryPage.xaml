@@ -1,0 +1,284 @@
+<Page x:Class="AIGeekTuner.Views.DiagnosisHistoryPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:converters="clr-namespace:AIGeekTuner.Converters"
+      xmlns:models="clr-namespace:AIGeekTuner.Models"
+      Title="DiagnosisHistoryPage"
+      Background="Transparent"
+      Loaded="OnLoaded">
+    <Page.Resources>
+        <converters:DateTimeOffsetToLocalTimeConverter x:Key="LocalTimeConverter"/>
+
+        <Style x:Key="HistoryRecordButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#0DFFFFFF"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderBrush" Value="#18FFFFFF"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="16,13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="RecordRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="RecordRoot" Property="Background" Value="#1AFFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="RecordRoot" Property="Background" Value="#24FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HistoryDeleteButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#12FFFFFF"/>
+            <Setter Property="Foreground" Value="#FFD0D0"/>
+            <Setter Property="BorderBrush" Value="#32FFB2B2"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="DeleteRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="DeleteRoot" Property="Background" Value="#25FFB2B2"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="HistoryExportButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#16FFFFFF"/>
+            <Setter Property="Foreground" Value="#D9F7FF"/>
+            <Setter Property="BorderBrush" Value="#399BE8F7"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="9,6"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ExportRoot"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ExportRoot" Property="Background" Value="#2B9BE8F7"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Page.Resources>
+
+    <Grid Margin="28,24,28,28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Grid.Row="0" Margin="0,0,0,19">
+            <TextBlock Text="日志管理" Style="{StaticResource PageTitleStyle}"/>
+            <TextBlock Text="保存在本机的 AI 硬件诊断记录；点击记录可重新打开完整报告"
+                       Style="{StaticResource PageSubtitleStyle}"/>
+            <TextBlock Text="{Binding StatusMessage}" Foreground="#C9F5E1"
+                       FontSize="11" Margin="0,6,0,0">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Visibility" Value="Visible"/>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
+                                <Setter Property="Visibility" Value="Collapsed"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </StackPanel>
+
+        <Border Grid.Row="1" Background="#18FFB0B0" Padding="14,10"
+                Margin="0,0,0,14" Visibility="{Binding ErrorVisibility}">
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="#FFF1F1"
+                       TextWrapping="Wrap"/>
+        </Border>
+
+        <Grid Grid.Row="2">
+            <Border Background="#0DFFFFFF" Padding="28"
+                    Visibility="{Binding LoadingVisibility}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <ProgressBar Width="190" Height="5" IsIndeterminate="True"
+                                 Foreground="#9BE8F7" Background="#24FFFFFF"/>
+                    <TextBlock Text="正在读取本地诊断记录..." Foreground="#D9F5FC"
+                               Margin="0,13,0,0" HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#0DFFFFFF" Padding="28"
+                    Visibility="{Binding EmptyVisibility}">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Text="▤" Foreground="#BDEFFA" FontSize="30"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="暂无诊断记录" Foreground="White" FontSize="20"
+                               FontWeight="SemiBold" Margin="0,13,0,0"
+                               HorizontalAlignment="Center"/>
+                    <TextBlock Text="完成一次 AI 智能诊断后，报告会自动保存在本机。"
+                               Foreground="#BDE4F1" Margin="0,7,0,0"
+                               HorizontalAlignment="Center"/>
+                </StackPanel>
+            </Border>
+
+            <Border Background="#0DFFFFFF" Padding="18,16,18,18"
+                    Visibility="{Binding RecordsVisibility}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Grid Margin="16,0,16,10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="150"/>
+                            <ColumnDefinition Width="190"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="90"/>
+                            <ColumnDefinition Width="34"/>
+                            <ColumnDefinition Width="132"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="诊断时间" Foreground="#A9D9E9" FontSize="11"/>
+                        <TextBlock Grid.Column="1" Text="日志名称" Foreground="#A9D9E9" FontSize="11"/>
+                        <TextBlock Grid.Column="2" Text="诊断摘要" Foreground="#A9D9E9" FontSize="11"/>
+                        <TextBlock Grid.Column="3" Text="风险等级" Foreground="#A9D9E9" FontSize="11"/>
+                        <TextBlock Grid.Column="5" Text="操作" Foreground="#A9D9E9" FontSize="11"
+                                   HorizontalAlignment="Center"/>
+                    </Grid>
+
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding Records}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type models:DiagnosisRecord}">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="132"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <Button Grid.Column="0"
+                                                Style="{StaticResource HistoryRecordButtonStyle}"
+                                                Command="{Binding DataContext.OpenRecordCommand, RelativeSource={RelativeSource AncestorType={x:Type Page}}}"
+                                                CommandParameter="{Binding}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="150"/>
+                                                    <ColumnDefinition Width="190"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="90"/>
+                                                    <ColumnDefinition Width="34"/>
+                                                </Grid.ColumnDefinitions>
+
+                                                <StackPanel VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding CreatedAt, Converter={StaticResource LocalTimeConverter}, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
+                                                               Foreground="White" FontSize="12"/>
+                                                    <TextBlock Text="{Binding SafetyStatus}"
+                                                               Foreground="#A9D9E9" FontSize="10" Margin="0,3,0,0"/>
+                                                </StackPanel>
+
+                                                <TextBlock Grid.Column="1" Text="{Binding LogFileName}"
+                                                           Foreground="#ECF9FF" TextTrimming="CharacterEllipsis"
+                                                           VerticalAlignment="Center" Margin="0,0,18,0"/>
+
+                                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,18,0">
+                                                    <TextBlock Text="{Binding Summary}" Foreground="White"
+                                                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                                                    <TextBlock Text="{Binding Confidence, StringFormat=可信度 {0:P0}}"
+                                                               Foreground="#A9D9E9" FontSize="10" Margin="0,3,0,0"/>
+                                                </StackPanel>
+
+                                                <Border Grid.Column="3" Background="#16FFFFFF"
+                                                        Padding="9,5" HorizontalAlignment="Left"
+                                                        VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding RiskLevel}" FontWeight="Bold" FontSize="11">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="#D7F6FF"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding RiskLevel}" Value="{x:Static models:DiagnosticRiskLevel.Low}">
+                                                                        <Setter Property="Foreground" Value="#A9F2D0"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding RiskLevel}" Value="{x:Static models:DiagnosticRiskLevel.Medium}">
+                                                                        <Setter Property="Foreground" Value="#FFE08A"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding RiskLevel}" Value="{x:Static models:DiagnosticRiskLevel.High}">
+                                                                        <Setter Property="Foreground" Value="#FFB07A"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding RiskLevel}" Value="{x:Static models:DiagnosticRiskLevel.Critical}">
+                                                                        <Setter Property="Foreground" Value="#FF9696"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
+
+                                                <TextBlock Grid.Column="4" Text="›" Foreground="#BDEFFA"
+                                                           FontSize="22" HorizontalAlignment="Right"
+                                                           VerticalAlignment="Center"/>
+                                            </Grid>
+                                        </Button>
+
+                                        <StackPanel Grid.Column="1" Orientation="Horizontal"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <Button Content="导出" Margin="4,0"
+                                                    Style="{StaticResource HistoryExportButtonStyle}"
+                                                    Command="{Binding DataContext.ExportRecordCommand, RelativeSource={RelativeSource AncestorType={x:Type Page}}}"
+                                                    CommandParameter="{Binding}"/>
+                                            <Button Content="删除" Margin="4,0"
+                                                    Style="{StaticResource HistoryDeleteButtonStyle}"
+                                                    Command="{Binding DataContext.DeleteRecordCommand, RelativeSource={RelativeSource AncestorType={x:Type Page}}}"
+                                                    CommandParameter="{Binding}"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

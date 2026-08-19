@@ -1,0 +1,22 @@
+{
+  "Name": "THERMAL_THROTTLE",
+  "Description": "处理器或图形设备报告热限制、过热或降频事件时使用的辅助条目。没有传感器数据时不能推测实际温度。",
+  "Keywords": [
+    "THERMAL_THROTTLE",
+    "THERMAL THROTTLING",
+    "THERMAL EVENT",
+    "OVERHEAT",
+    "PROCHOT"
+  ],
+  "CommonCauses": [
+    "散热系统积尘、风道受阻或环境温度偏高",
+    "持续高负载触发设备设计的热保护策略",
+    "传感器、固件或性能管理策略异常"
+  ],
+  "VerificationSteps": [
+    "使用系统或硬件厂商工具记录负载期间的温度与频率",
+    "检查风扇运行、进出风口和散热器状态",
+    "在相同环境和默认配置下重复负载测试"
+  ],
+  "RiskLevel": "High"
+}

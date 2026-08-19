@@ -1,0 +1,23 @@
+{
+  "Name": "MEMORY_MANAGEMENT",
+  "Description": "Windows 内存管理错误或内存稳定性测试异常的参考条目。相关日志可能涉及物理内存、驱动或存储映射，不能仅凭错误名称确认内存条损坏。",
+  "Keywords": [
+    "MEMORY_MANAGEMENT",
+    "MEMORY",
+    "0x0000001A",
+    "0x1A",
+    "TM5",
+    "MEMTEST"
+  ],
+  "CommonCauses": [
+    "内存稳定性不足或当前内存配置不兼容",
+    "驱动程序错误访问内存",
+    "系统文件或页面文件相关异常"
+  ],
+  "VerificationSteps": [
+    "记录内存测试工具的错误编号和复现条件",
+    "恢复默认内存配置后重新运行稳定性测试",
+    "结合蓝屏参数、事件日志和多轮测试结果交叉确认"
+  ],
+  "RiskLevel": "High"
+}
