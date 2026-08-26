@@ -1,7 +1,9 @@
+using System.Globalization;
 using System.IO;
 using System.Security;
 using System.Text.Json;
 using AIGeekTuner.Configuration;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Storage;
 
 namespace AIGeekTuner.Services.Settings
@@ -17,13 +19,14 @@ namespace AIGeekTuner.Services.Settings
 
         private readonly string _settingsPath;
         private readonly SemaphoreSlim _writeLock = new(1, 1);
+        private ApplicationSettings _current;
 
         public JsonApplicationSettingsService(string? settingsPath = null)
         {
             var paths = ApplicationDataPaths.Default;
             _settingsPath = Path.GetFullPath(
                 settingsPath ?? paths.SettingsFilePath);
-            Current = settingsPath is null
+            _current = settingsPath is null
                 ? LoadWithLegacyFallback(
                     _settingsPath,
                     paths.LegacySettingsFilePath)
@@ -34,17 +37,25 @@ namespace AIGeekTuner.Services.Settings
         {
             ArgumentNullException.ThrowIfNull(paths);
             _settingsPath = paths.SettingsFilePath;
-            Current = LoadWithLegacyFallback(
+            _current = LoadWithLegacyFallback(
                 _settingsPath,
                 paths.LegacySettingsFilePath);
         }
 
-        public ApplicationSettings Current { get; }
+        public ApplicationSettings Current => Volatile.Read(ref _current);
 
-        public async Task SetAutoSaveDiagnosisHistoryAsync(
-            bool enabled,
+        public async Task SaveAsync(
+            ApplicationSettings settings,
             CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(settings);
+
+            var errors = ApplicationSettingsValidator.Validate(settings);
+            if (errors.Count > 0)
+            {
+                throw new ApplicationSettingsException(string.Join(" ", errors));
+            }
+
             await _writeLock.WaitAsync(cancellationToken);
             try
             {
@@ -55,15 +66,10 @@ namespace AIGeekTuner.Services.Settings
                 }
 
                 Directory.CreateDirectory(directory);
-                var updatedSettings = new ApplicationSettings
-                {
-                    AutoSaveDiagnosisHistory = enabled
-                };
-                await WriteAtomicallyAsync(
-                    updatedSettings,
-                    cancellationToken);
+                await WriteAtomicallyAsync(settings, cancellationToken);
 
-                Current.AutoSaveDiagnosisHistory = enabled;
+                // 磁盘写成功后才切换内存快照，保证两者不出现“先失效后失败”的错位。
+                Volatile.Write(ref _current, settings);
             }
             catch (OperationCanceledException)
             {
@@ -73,9 +79,7 @@ namespace AIGeekTuner.Services.Settings
                 exception is IOException
                     or UnauthorizedAccessException
                     or SecurityException
-                    or JsonException
-                    or NotSupportedException
-                    or ArgumentException)
+                    or NotSupportedException)
             {
                 throw new ApplicationSettingsException(
                     "无法保存应用设置，请检查本地应用数据目录的访问权限。",
@@ -116,7 +120,7 @@ namespace AIGeekTuner.Services.Settings
             }
             catch
             {
-                // A failed compatibility copy must not prevent startup.
+                // 兼容迁移失败不能阻止启动。
             }
 
             return File.Exists(legacySettingsPath)
@@ -126,23 +130,54 @@ namespace AIGeekTuner.Services.Settings
 
         private static ApplicationSettings LoadOrDefault(string settingsPath)
         {
+            if (!File.Exists(settingsPath))
+            {
+                return new ApplicationSettings();
+            }
+
             try
             {
-                if (!File.Exists(settingsPath))
-                {
-                    return new ApplicationSettings();
-                }
-
                 var json = File.ReadAllText(settingsPath);
                 return JsonSerializer.Deserialize<ApplicationSettings>(
                            json,
                            JsonOptions)
                        ?? new ApplicationSettings();
             }
+            catch (JsonException exception)
+            {
+                // 损坏的 settings.json 不允许拖垮应用：
+                // 留痕 → best-effort 改名备份 → 以默认配置继续启动。
+                ExceptionLogWriter.Write(exception, "Settings load");
+                BackupCorruptSettings(settingsPath);
+                return new ApplicationSettings();
+            }
             catch
             {
-                // 无法读取或解析时使用安全默认值，不阻止程序启动。
+                // 读取类 IO 失败同样使用默认值，但无内容可备份。
                 return new ApplicationSettings();
+            }
+        }
+
+        private static void BackupCorruptSettings(string settingsPath)
+        {
+            try
+            {
+                var directory = Path.GetDirectoryName(settingsPath);
+                if (string.IsNullOrWhiteSpace(directory) || !File.Exists(settingsPath))
+                {
+                    return;
+                }
+
+                Directory.CreateDirectory(directory);
+                var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+                File.Move(
+                    settingsPath,
+                    Path.Combine(directory, $"settings.corrupt-{stamp}.json"),
+                    overwrite: false);
+            }
+            catch (Exception backupFailure)
+            {
+                ExceptionLogWriter.Write(backupFailure, "Settings corrupt backup");
             }
         }
 

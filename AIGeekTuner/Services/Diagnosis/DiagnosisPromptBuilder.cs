@@ -7,7 +7,7 @@ namespace AIGeekTuner.Services.Diagnosis
 {
     public sealed class DiagnosisPromptBuilder
     {
-        private readonly DiagnosisInputOptions _inputOptions;
+        private readonly Func<DiagnosisInputOptions> _inputOptionsSource;
 
         private static readonly JsonSerializerOptions ContextJsonOptions = new()
         {
@@ -18,14 +18,31 @@ namespace AIGeekTuner.Services.Diagnosis
         };
 
         public DiagnosisPromptBuilder(DiagnosisInputOptions? inputOptions = null)
+            : this(() => inputOptions ?? new DiagnosisInputOptions())
         {
-            _inputOptions = inputOptions ?? new DiagnosisInputOptions();
-            if (_inputOptions.MaxFaultLogCharacters < 1_000)
+        }
+
+        /// <summary>
+        /// 以“配置工厂”构造：每次构造用户上下文时取一次快照，
+        /// 设置保存后下一次诊断立即使用新的输入限制。
+        /// </summary>
+        public DiagnosisPromptBuilder(Func<DiagnosisInputOptions> inputOptionsSource)
+        {
+            _inputOptionsSource = inputOptionsSource ?? throw new ArgumentNullException(nameof(inputOptionsSource));
+        }
+
+        private DiagnosisInputOptions ResolveOptions()
+        {
+            var options = _inputOptionsSource();
+            ArgumentNullException.ThrowIfNull(options);
+            if (options.MaxFaultLogCharacters < 1_000)
             {
                 throw new ArgumentOutOfRangeException(
-                    nameof(inputOptions),
+                    nameof(DiagnosisInputOptions),
                     "故障日志最大输入长度不能小于 1000 个字符。");
             }
+
+            return options;
         }
 
         public string BuildSystemPrompt()
@@ -144,6 +161,18 @@ namespace AIGeekTuner.Services.Diagnosis
 
         public string BuildUserContext(DiagnosticRequest request)
         {
+            return BuildUserContext(request, ResolveOptions());
+        }
+
+        /// <summary>
+        /// 由调用方显式提供本次诊断的输入配置快照，
+        /// 与模型请求使用的配置来自同一次快照获取。
+        /// </summary>
+        public string BuildUserContext(
+            DiagnosticRequest request,
+            DiagnosisInputOptions inputOptions)
+        {
+            ArgumentNullException.ThrowIfNull(inputOptions);
             ArgumentNullException.ThrowIfNull(request);
             ArgumentNullException.ThrowIfNull(request.Hardware);
             ArgumentNullException.ThrowIfNull(request.FaultLog);
@@ -154,7 +183,8 @@ namespace AIGeekTuner.Services.Diagnosis
             }
 
             var faultLogContent = PrepareFaultLogContent(
-                request.FaultLog.Content);
+                request.FaultLog.Content,
+                inputOptions.MaxFaultLogCharacters);
 
             var context = new
             {
@@ -181,9 +211,10 @@ namespace AIGeekTuner.Services.Diagnosis
         }
 
         private FaultLogPromptContent PrepareFaultLogContent(
-            string content)
+            string content,
+            int maxFaultLogCharacters)
         {
-            if (content.Length <= _inputOptions.MaxFaultLogCharacters)
+            if (content.Length <= maxFaultLogCharacters)
             {
                 return new FaultLogPromptContent(
                     content,
@@ -194,7 +225,7 @@ namespace AIGeekTuner.Services.Diagnosis
             var truncationNotice =
                 $"\n\n[日志已截断：原始长度 {content.Length} 个字符；仅保留开头和结尾，中间内容已省略。]\n\n";
             var availableCharacters =
-                _inputOptions.MaxFaultLogCharacters - truncationNotice.Length;
+                maxFaultLogCharacters - truncationNotice.Length;
             var headLength = availableCharacters * 2 / 3;
             var tailLength = availableCharacters - headLength;
             var truncatedContent = string.Concat(

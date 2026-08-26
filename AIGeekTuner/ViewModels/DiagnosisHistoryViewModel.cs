@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Models;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.History;
 using AIGeekTuner.Services.Navigation;
 using AIGeekTuner.Services.Dialogs;
@@ -19,6 +20,7 @@ namespace AIGeekTuner.ViewModels
         private readonly AsyncRelayCommand<DiagnosisRecord> _openRecordCommand;
         private readonly AsyncRelayCommand<DiagnosisRecord> _deleteRecordCommand;
         private readonly AsyncRelayCommand<DiagnosisRecord> _exportRecordCommand;
+        private readonly AsyncRelayCommand _clearAllCommand;
 
         private bool _isLoading;
         private string? _errorMessage;
@@ -40,13 +42,16 @@ namespace AIGeekTuner.ViewModels
             _latestDiagnosisState = latestDiagnosisState ?? throw new ArgumentNullException(nameof(latestDiagnosisState));
             _openRecordCommand = new AsyncRelayCommand<DiagnosisRecord>(
                 OpenRecordAsync,
-                _ => !IsLoading);
+                record => !IsLoading && record.Succeeded);
             _deleteRecordCommand = new AsyncRelayCommand<DiagnosisRecord>(
                 DeleteRecordAsync,
                 _ => !IsLoading);
             _exportRecordCommand = new AsyncRelayCommand<DiagnosisRecord>(
                 ExportRecordAsync,
-                _ => !IsLoading);
+                record => !IsLoading && record.Succeeded);
+            _clearAllCommand = new AsyncRelayCommand(
+                ClearAllAsync,
+                () => !IsLoading);
         }
 
         public ObservableCollection<DiagnosisRecord> Records { get; } = [];
@@ -111,6 +116,9 @@ namespace AIGeekTuner.ViewModels
         public AsyncRelayCommand<DiagnosisRecord> ExportRecordCommand =>
             _exportRecordCommand;
 
+        public AsyncRelayCommand ClearAllCommand =>
+            _clearAllCommand;
+
         public async Task LoadAsync()
         {
             IsLoading = true;
@@ -125,6 +133,12 @@ namespace AIGeekTuner.ViewModels
             catch (DiagnosisHistoryException exception)
             {
                 ErrorMessage = exception.Message;
+            }
+            catch (Exception exception)
+            {
+                // 未预期异常走页面内错误横幅，不弹窗（与业务异常同一反馈通道，避免双重提示）。
+                ExceptionLogWriter.Write(exception, "DiagnosisHistoryViewModel.LoadAsync");
+                ErrorMessage = "读取历史记录时发生未预期的错误，请稍后重试。";
             }
             finally
             {
@@ -159,6 +173,11 @@ namespace AIGeekTuner.ViewModels
             {
                 ErrorMessage = exception.Message;
             }
+            catch (Exception exception)
+            {
+                ExceptionLogWriter.Write(exception, "DiagnosisHistoryViewModel.DeleteRecordAsync");
+                ErrorMessage = "删除历史记录时发生未预期的错误，请稍后重试。";
+            }
             finally
             {
                 IsLoading = false;
@@ -173,11 +192,11 @@ namespace AIGeekTuner.ViewModels
             StatusMessage = null;
             try
             {
-                var outcome = await _historyService.LoadOutcomeAsync(
+                var detail = await _historyService.LoadDetailAsync(
                     record,
                     CancellationToken.None);
                 await _reportExportService.ExportAsync(
-                    outcome,
+                    detail.Outcome!,
                     CancellationToken.None);
                 StatusMessage = "报告已导出到本地数据目录。";
             }
@@ -189,9 +208,41 @@ namespace AIGeekTuner.ViewModels
             {
                 ErrorMessage = exception.Message;
             }
-            catch
+            catch (Exception exception)
             {
+                ExceptionLogWriter.Write(exception, "DiagnosisHistoryViewModel.ExportRecordAsync");
                 ErrorMessage = "报告导出失败，请稍后重试。";
+            }
+            finally
+            {
+                IsLoading = false;
+                OnStateChanged();
+            }
+        }
+
+        public async Task ClearAllAsync()
+        {
+            var confirmed = _confirmationDialogService.Confirm(
+                "清空诊断历史",
+                "此操作将删除全部本地诊断历史，无法撤销。确定继续吗？");
+            if (!confirmed)
+            {
+                return;
+            }
+
+            IsLoading = true;
+            ErrorMessage = null;
+            StatusMessage = null;
+            try
+            {
+                await _historyService.ClearAllAsync(CancellationToken.None);
+                Records.Clear();
+                OnStateChanged();
+                StatusMessage = "已清空全部本地诊断历史。";
+            }
+            catch (DiagnosisHistoryException exception)
+            {
+                ErrorMessage = exception.Message;
             }
             finally
             {
@@ -207,15 +258,23 @@ namespace AIGeekTuner.ViewModels
             StatusMessage = null;
             try
             {
-                var outcome = await _historyService.LoadOutcomeAsync(
+                var detail = await _historyService.LoadDetailAsync(
                     record,
                     CancellationToken.None);
+
+                // 失败记录不会进入这里（CanExecute 已拦截成功项之外的打开）。
+                var outcome = detail.Outcome!;
                 _latestDiagnosisState.Outcome = outcome;
                 _navigationService.NavigateTo(AppPage.Result, outcome);
             }
             catch (DiagnosisHistoryException exception)
             {
                 ErrorMessage = exception.Message;
+            }
+            catch (Exception exception)
+            {
+                ExceptionLogWriter.Write(exception, "DiagnosisHistoryViewModel.OpenRecordAsync");
+                ErrorMessage = "打开历史报告时发生未预期的错误，请稍后重试。";
             }
             finally
             {

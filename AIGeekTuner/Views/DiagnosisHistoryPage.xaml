@@ -35,6 +35,10 @@
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="RecordRoot" Property="Background" Value="#24FFFFFF"/>
                             </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="RecordRoot" Property="Opacity" Value="0.55"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -113,24 +117,37 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,19">
-            <TextBlock Text="日志管理" Style="{StaticResource PageTitleStyle}"/>
-            <TextBlock Text="保存在本机的 AI 硬件诊断记录；点击记录可重新打开完整报告"
-                       Style="{StaticResource PageSubtitleStyle}"/>
-            <TextBlock Text="{Binding StatusMessage}" Foreground="#C9F5E1"
-                       FontSize="11" Margin="0,6,0,0">
-                <TextBlock.Style>
-                    <Style TargetType="TextBlock">
-                        <Setter Property="Visibility" Value="Visible"/>
-                        <Style.Triggers>
-                            <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
-                                <Setter Property="Visibility" Value="Collapsed"/>
-                            </DataTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </TextBlock.Style>
-            </TextBlock>
-        </StackPanel>
+        <Grid Grid.Row="0" Margin="0,0,0,19">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <StackPanel>
+                <TextBlock Text="日志管理" Style="{StaticResource PageTitleStyle}"/>
+                <TextBlock Text="保存在本机的 AI 硬件诊断记录；点击成功记录可重新打开完整报告"
+                           Style="{StaticResource PageSubtitleStyle}"/>
+            </StackPanel>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,8,0,0">
+                <TextBlock Text="{Binding StatusMessage}" Foreground="#C9F5E1"
+                           FontSize="11" VerticalAlignment="Center">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Setter Property="Visibility" Value="Visible"/>
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding StatusMessage}" Value="{x:Null}">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+                <Button Content="清空历史"
+                        Command="{Binding ClearAllCommand}"
+                        Style="{StaticResource HistoryDeleteButtonStyle}"
+                        Padding="12,5" Margin="12,0,0,0"
+                        HorizontalAlignment="Left"/>
+            </StackPanel>
+        </Grid>
 
         <Border Grid.Row="1" Background="#18FFB0B0" Padding="14,10"
                 Margin="0,0,0,14" Visibility="{Binding ErrorVisibility}">
@@ -154,7 +171,7 @@
                 <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
                     <TextBlock Text="▤" Foreground="#BDEFFA" FontSize="30"
                                HorizontalAlignment="Center"/>
-                    <TextBlock Text="暂无诊断记录" Foreground="White" FontSize="20"
+                    <TextBlock Text="暂无诊断历史" Foreground="White" FontSize="20"
                                FontWeight="SemiBold" Margin="0,13,0,0"
                                HorizontalAlignment="Center"/>
                     <TextBlock Text="完成一次 AI 智能诊断后，报告会自动保存在本机。"
@@ -180,9 +197,9 @@
                             <ColumnDefinition Width="34"/>
                             <ColumnDefinition Width="132"/>
                         </Grid.ColumnDefinitions>
-                        <TextBlock Text="诊断时间" Foreground="#A9D9E9" FontSize="11"/>
+                        <TextBlock Text="时间 · 状态" Foreground="#A9D9E9" FontSize="11"/>
                         <TextBlock Grid.Column="1" Text="日志名称" Foreground="#A9D9E9" FontSize="11"/>
-                        <TextBlock Grid.Column="2" Text="诊断摘要" Foreground="#A9D9E9" FontSize="11"/>
+                        <TextBlock Grid.Column="2" Text="摘要 / 失败原因" Foreground="#A9D9E9" FontSize="11"/>
                         <TextBlock Grid.Column="3" Text="风险等级" Foreground="#A9D9E9" FontSize="11"/>
                         <TextBlock Grid.Column="5" Text="操作" Foreground="#A9D9E9" FontSize="11"
                                    HorizontalAlignment="Center"/>
@@ -200,6 +217,8 @@
 
                                         <Button Grid.Column="0"
                                                 Style="{StaticResource HistoryRecordButtonStyle}"
+                                                IsEnabled="{Binding Succeeded}"
+                                                ToolTipService.IsEnabled="{Binding Succeeded}"
                                                 Command="{Binding DataContext.OpenRecordCommand, RelativeSource={RelativeSource AncestorType={x:Type Page}}}"
                                                 CommandParameter="{Binding}">
                                             <Grid>
@@ -214,19 +233,29 @@
                                                 <StackPanel VerticalAlignment="Center">
                                                     <TextBlock Text="{Binding CreatedAt, Converter={StaticResource LocalTimeConverter}, StringFormat={}{0:yyyy-MM-dd HH:mm}}"
                                                                Foreground="White" FontSize="12"/>
-                                                    <TextBlock Text="{Binding SafetyStatus}"
-                                                               Foreground="#A9D9E9" FontSize="10" Margin="0,3,0,0"/>
+                                                    <TextBlock Text="{Binding StatusDisplay}" FontSize="10" Margin="0,3,0,0">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="#A9F2D0"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Succeeded}" Value="False">
+                                                                        <Setter Property="Foreground" Value="#FFB2B2"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
                                                 </StackPanel>
 
                                                 <TextBlock Grid.Column="1" Text="{Binding LogFileName}"
                                                            Foreground="#ECF9FF" TextTrimming="CharacterEllipsis"
-                                                           VerticalAlignment="Center" Margin="0,0,18,0"/>
-
-                                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,18,0">
+                                                           VerticalAlignment="Center" Margin="0,0,18,0"/>                                                <StackPanel Grid.Column="2" VerticalAlignment="Center" Margin="0,0,18,0">
                                                     <TextBlock Text="{Binding Summary}" Foreground="White"
-                                                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
-                                                    <TextBlock Text="{Binding Confidence, StringFormat=可信度 {0:P0}}"
-                                                               Foreground="#A9D9E9" FontSize="10" Margin="0,3,0,0"/>
+                                                               FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Summary}"/>
+                                                    <TextBlock Foreground="#A9D9E9" FontSize="10" Margin="0,3,0,0">
+                                                        <Run Text="模型 "/><Run Text="{Binding ModelDisplay, Mode=OneWay}"/><Run Text=" · 耗时 "/><Run Text="{Binding DurationDisplay, Mode=OneWay}"/>
+                                                    </TextBlock>
                                                 </StackPanel>
 
                                                 <Border Grid.Column="3" Background="#16FFFFFF"
@@ -265,6 +294,7 @@
                                                     HorizontalAlignment="Center" VerticalAlignment="Center">
                                             <Button Content="导出" Margin="4,0"
                                                     Style="{StaticResource HistoryExportButtonStyle}"
+                                                    IsEnabled="{Binding Succeeded}"
                                                     Command="{Binding DataContext.ExportRecordCommand, RelativeSource={RelativeSource AncestorType={x:Type Page}}}"
                                                     CommandParameter="{Binding}"/>
                                             <Button Content="删除" Margin="4,0"

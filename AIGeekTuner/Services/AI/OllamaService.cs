@@ -11,23 +11,33 @@ namespace AIGeekTuner.Services.AI
     public sealed class OllamaService : IAiService
     {
         private readonly HttpClient _httpClient;
-        private readonly Uri _baseUri;
-        private readonly OllamaOptions _options;
+        private readonly Func<OllamaOptions> _optionsSource;
         private readonly DiagnosticResultParser _resultParser;
 
         public OllamaService(
             HttpClient httpClient,
             OllamaOptions options,
             DiagnosticResultParser? resultParser = null)
+            : this(httpClient, () => options, resultParser)
+        {
+        }
+
+        /// <summary>
+        /// 以“配置工厂”构造：每次请求开始时调用一次并全程使用该次返回的快照，
+        /// 因此设置保存后下一次请求立即生效，而进行中的请求不受影响。
+        /// </summary>
+        public OllamaService(
+            HttpClient httpClient,
+            Func<OllamaOptions> optionsSource,
+            DiagnosticResultParser? resultParser = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             // Ollama requests use the linked CancellationToken timeout below. Disable
-            // HttpClient's 100-second default so OllamaOptions.TimeoutSeconds remains
+            // HttpClient's 100-second default so the per-request TimeoutSeconds remains
             // the single effective timeout for larger local models.
             _httpClient.Timeout = Timeout.InfiniteTimeSpan;
-            _options = options ?? throw new ArgumentNullException(nameof(options));
+            _optionsSource = optionsSource ?? throw new ArgumentNullException(nameof(optionsSource));
             _resultParser = resultParser ?? new DiagnosticResultParser();
-            _baseUri = ValidateAndCreateBaseUri(options);
         }
 
         public async Task<bool> IsAvailableAsync(
@@ -35,10 +45,11 @@ namespace AIGeekTuner.Services.AI
         {
             try
             {
-                return await ExecuteWithTimeoutAsync(async token =>
+                var options = ResolveOptions();
+                return await ExecuteWithTimeoutAsync(options.TimeoutSeconds, async token =>
                 {
                     using var response = await _httpClient.GetAsync(
-                        CreateEndpointUri("api/tags"),
+                        CreateEndpointUri(options.BaseUrl, "api/tags"),
                         token);
                     return response.IsSuccessStatusCode;
                 }, cancellationToken);
@@ -53,25 +64,29 @@ namespace AIGeekTuner.Services.AI
             }
         }
 
-        public Task<string> SendMessageAsync(
-            string message,
-            CancellationToken cancellationToken = default)
-        {
-            if (string.IsNullOrWhiteSpace(message))
-            {
-                throw new ArgumentException("消息内容不能为空。", nameof(message));
-            }
-
-            return SendMessagesAsync(
-                [new ChatMessage("user", message)],
-                cancellationToken);
-        }
-
         public async Task<DiagnosticResult> GetDiagnosticResultAsync(
             string systemPrompt,
             string userContext,
             CancellationToken cancellationToken = default)
         {
+            return await GetDiagnosticResultAsync(
+                systemPrompt,
+                userContext,
+                ResolveOptions(),
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// 由调用方显式提供本次使用的配置快照；
+        /// 修复重试等内部后续请求同样使用这一份。
+        /// </summary>
+        public async Task<DiagnosticResult> GetDiagnosticResultAsync(
+            string systemPrompt,
+            string userContext,
+            OllamaOptions options,
+            CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(options);
             if (string.IsNullOrWhiteSpace(systemPrompt))
             {
                 throw new ArgumentException("System Prompt 不能为空。", nameof(systemPrompt));
@@ -82,33 +97,81 @@ namespace AIGeekTuner.Services.AI
                 throw new ArgumentException("用户上下文不能为空。", nameof(userContext));
             }
 
-            var modelResponse = await SendMessagesAsync(
-                [
-                    new ChatMessage("system", systemPrompt),
-                    new ChatMessage("user", userContext)
-                ],
+            var baseMessages = new ChatMessage[]
+            {
+                new("system", systemPrompt),
+                new("user", userContext)
+            };
+
+            var firstResponse = await SendMessagesAsync(
+                baseMessages,
+                options,
                 cancellationToken);
 
-            return _resultParser.Parse(modelResponse);
+            try
+            {
+                return _resultParser.Parse(firstResponse);
+            }
+            catch (DiagnosticResultParsingException firstError)
+            {
+                // 只有“模型成功返回文本但结构无效”才做唯一一次修复重试；
+                // HTTP 错误、超时、取消等异常不会进入本分支，直接向上传播。
+                var repairResponse = await SendMessagesAsync(
+                [
+                    .. baseMessages,
+                    new ChatMessage("assistant", firstResponse),
+                    new ChatMessage("user", BuildRepairInstruction(firstError))
+                ],
+                options,
+                cancellationToken);
+
+                try
+                {
+                    return _resultParser.Parse(repairResponse);
+                }
+                catch (DiagnosticResultParsingException secondError)
+                {
+                    throw new DiagnosticResultParsingException(
+                        $"模型两次输出均无法解析为诊断结果。首次错误：{firstError.Message}；修复后错误：{secondError.Message}",
+                        secondError);
+                }
+            }
+        }
+
+        private static string BuildRepairInstruction(
+            DiagnosticResultParsingException parseError)
+        {
+            return $$"""
+你上一条回答未能通过 JSON 结构校验：{{parseError.Message}}
+
+请严格按以下要求重新输出：
+1. 只输出一个合法的 JSON 对象；第一个非空白字符必须是 {{'{'}}，最后一个非空白字符必须是 {{'}'}}。
+2. 字段结构与最初要求完全一致：summary、rootCause、confidence（0 到 1 的数字）、riskLevel（只能取 "Low"、"Medium"、"High"）、evidence 数组（kind 只能取 "Fact" 或 "Inference"，description 必填）、recommendations 数组（action、reason、riskLevel 必填，precautions 为字符串数组）。
+3. 尽可能保留上一条回答中已有的诊断语义与结论，只修正 JSON 结构和非法字段值。
+4. 禁止新增上一条回答中没有依据的事实；禁止编造温度、电压、功耗、BIOS、超频状态等输入中不存在的数据。
+5. 禁止输出 Markdown、代码围栏、解释文字或 <think> 标签。
+""";
         }
 
         private async Task<string> SendMessagesAsync(
             IReadOnlyList<ChatMessage> messages,
+            OllamaOptions options,
             CancellationToken cancellationToken)
         {
             try
             {
-                return await ExecuteWithTimeoutAsync(async token =>
+                return await ExecuteWithTimeoutAsync(options.TimeoutSeconds, async token =>
                 {
                     var request = new ChatRequest(
-                        _options.ModelName,
+                        options.ModelName,
                         messages,
                         Stream: false,
                         Think: false,
-                        Options: new ChatOptions(Temperature: 0.2));
+                        Options: new ChatOptions(Temperature: 0.2),
+                        Format: options.UseJsonFormat ? "json" : null);
 
                     using var response = await _httpClient.PostAsJsonAsync(
-                        CreateEndpointUri("api/chat"),
+                        CreateEndpointUri(options.BaseUrl, "api/chat"),
                         request,
                         token);
 
@@ -133,7 +196,7 @@ namespace AIGeekTuner.Services.AI
             catch (HttpRequestException exception)
             {
                 throw new OllamaServiceException(
-                    $"无法连接本地 Ollama 服务：{_baseUri}",
+                    $"无法连接本地 Ollama 服务：{ResolveOptions().BaseUrl}",
                     exception);
             }
             catch (JsonException exception)
@@ -144,13 +207,14 @@ namespace AIGeekTuner.Services.AI
             }
         }
 
-        private async Task<T> ExecuteWithTimeoutAsync<T>(
+        private static async Task<T> ExecuteWithTimeoutAsync<T>(
+            int timeoutSeconds,
             Func<CancellationToken, Task<T>> operation,
             CancellationToken cancellationToken)
         {
             using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(
                 cancellationToken);
-            timeoutSource.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
+            timeoutSource.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
             try
             {
@@ -160,40 +224,31 @@ namespace AIGeekTuner.Services.AI
                 when (!cancellationToken.IsCancellationRequested)
             {
                 throw new TimeoutException(
-                    $"Ollama 请求在 {_options.TimeoutSeconds} 秒后超时。",
+                    $"Ollama 请求在 {timeoutSeconds} 秒后超时。",
                     exception);
             }
         }
 
-        private Uri CreateEndpointUri(string relativePath) =>
-            new(_baseUri, relativePath);
-
-        private static Uri ValidateAndCreateBaseUri(OllamaOptions options)
+        private OllamaOptions ResolveOptions()
         {
-            if (!Uri.TryCreate(options.BaseUrl, UriKind.Absolute, out var uri) ||
+            var options = _optionsSource();
+            ArgumentNullException.ThrowIfNull(options);
+            return options;
+        }
+
+        private Uri CreateEndpointUri(string baseUrl, string relativePath)
+        {
+            if (!Uri.TryCreate(baseUrl, UriKind.Absolute, out var uri) ||
                 (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
             {
-                throw new ArgumentException(
-                    "Ollama BaseUrl 必须是有效的 HTTP 或 HTTPS 地址。",
-                    nameof(options));
+                throw new OllamaServiceException(
+                    $"Ollama 服务地址无效：{baseUrl}");
             }
 
-            if (string.IsNullOrWhiteSpace(options.ModelName))
-            {
-                throw new ArgumentException("Ollama ModelName 不能为空。", nameof(options));
-            }
-
-            if (options.TimeoutSeconds <= 0)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(options),
-                    "Ollama TimeoutSeconds 必须大于 0。");
-            }
-
-            var baseUrl = options.BaseUrl.EndsWith('/')
-                ? options.BaseUrl
-                : $"{options.BaseUrl}/";
-            return new Uri(baseUrl, UriKind.Absolute);
+            var normalized = baseUrl.EndsWith('/')
+                ? baseUrl
+                : $"{baseUrl}/";
+            return new(new Uri(normalized), relativePath);
         }
 
         private static string LimitErrorText(string error)
@@ -210,7 +265,10 @@ namespace AIGeekTuner.Services.AI
             [property: JsonPropertyName("messages")] IReadOnlyList<ChatMessage> Messages,
             [property: JsonPropertyName("stream")] bool Stream,
             [property: JsonPropertyName("think")] bool Think,
-            [property: JsonPropertyName("options")] ChatOptions Options);
+            [property: JsonPropertyName("options")] ChatOptions Options,
+            // 关闭 JSON mode 时整个 format 字段从请求体中省略，而不是发送 null。
+            [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+            [property: JsonPropertyName("format")] string? Format = null);
 
         private sealed record ChatOptions(
             [property: JsonPropertyName("temperature")] double Temperature);

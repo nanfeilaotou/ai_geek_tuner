@@ -1,14 +1,17 @@
+using System.Diagnostics;
 using System.Windows.Input;
 using AIGeekTuner.Commands;
+using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
-using AIGeekTuner.Services.Diagnosis;
+using AIGeekTuner.Services.Context;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Dialogs;
+using AIGeekTuner.Services.Diagnosis;
 using AIGeekTuner.Services.Files;
 using AIGeekTuner.Services.Hardware;
 using AIGeekTuner.Services.History;
-using AIGeekTuner.Services.Navigation;
-using AIGeekTuner.Services.Context;
 using AIGeekTuner.Services.Knowledge;
+using AIGeekTuner.Services.Navigation;
 using AIGeekTuner.Services.Settings;
 
 namespace AIGeekTuner.ViewModels
@@ -24,6 +27,7 @@ namespace AIGeekTuner.ViewModels
         private readonly ISystemContextCollector _systemContextCollector;
         private readonly IDiagnosticKnowledgeService _knowledgeService;
         private readonly IApplicationSettingsService _applicationSettingsService;
+        private readonly DiagnosticConfigurationStore _configurationStore;
         private readonly LatestDiagnosisState _latestDiagnosisState;
         private readonly AsyncRelayCommand _selectFileCommand;
         private readonly AsyncRelayCommand _startDiagnosisCommand;
@@ -55,6 +59,7 @@ namespace AIGeekTuner.ViewModels
             ISystemContextCollector systemContextCollector,
             IDiagnosticKnowledgeService knowledgeService,
             IApplicationSettingsService applicationSettingsService,
+            DiagnosticConfigurationStore configurationStore,
             LatestDiagnosisState latestDiagnosisState)
         {
             _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
@@ -67,6 +72,8 @@ namespace AIGeekTuner.ViewModels
             _knowledgeService = knowledgeService ?? throw new ArgumentNullException(nameof(knowledgeService));
             _applicationSettingsService = applicationSettingsService
                 ?? throw new ArgumentNullException(nameof(applicationSettingsService));
+            _configurationStore = configurationStore
+                ?? throw new ArgumentNullException(nameof(configurationStore));
             _latestDiagnosisState = latestDiagnosisState ?? throw new ArgumentNullException(nameof(latestDiagnosisState));
 
             _selectFileCommand = new AsyncRelayCommand(SelectFileAsync, () => !IsLoading);
@@ -161,6 +168,9 @@ namespace AIGeekTuner.ViewModels
 
             await RunOperationAsync(async cancellationToken =>
             {
+                // 真实诊断入口开始计时（含硬件/readiness/AI/Safety 全程）。
+                var diagnosisStopwatch = Stopwatch.StartNew();
+
                 var faultLog = CreateFaultLog();
                 StatusMessage = "正在读取本机真实硬件信息...";
                 var hardware = await _hardwareDetectionService.DetectAsync(cancellationToken);
@@ -175,6 +185,8 @@ namespace AIGeekTuner.ViewModels
                 SafetyStepStatus = "等待 AI 结果";
                 StatusMessage = "正在调用本地 Ollama；返回后将自动执行 SafetyGuard...";
 
+                // 本次诊断的唯一配置快照：readiness、prompt、模型请求共用。
+                var configuration = _configurationStore.Snapshot();
                 var request = new DiagnosticRequest
                 {
                     Hardware = hardware,
@@ -183,7 +195,36 @@ namespace AIGeekTuner.ViewModels
                     KnowledgeContext = knowledgeContext,
                     RequestedAt = DateTimeOffset.UtcNow
                 };
-                var outcome = await _diagnosisService.DiagnoseAsync(request, cancellationToken);
+                DiagnosisOutcome outcome;
+                try
+                {
+                    outcome = await _diagnosisService.DiagnoseAsync(
+                        request,
+                        configuration,
+                        cancellationToken);
+                }
+                catch (OperationCanceledException)
+                    when (cancellationToken.IsCancellationRequested)
+                {
+                    // 用户主动取消不是系统失败：不写入历史。
+                    throw;
+                }
+                catch (DiagnosisException exception)
+                    when (!DiagnosisFailurePolicy.ShouldPersistFailure(exception.Error))
+                {
+                    // 输入校验类问题不生成历史记录。
+                    throw;
+                }
+                catch (DiagnosisException exception)
+                {
+                    await TrySaveFailureHistorySilentlyAsync(
+                        exception.Error.ToString(),
+                        exception.Message,
+                        configuration,
+                        diagnosisStopwatch.ElapsedMilliseconds,
+                        cancellationToken);
+                    throw;
+                }
 
                 AiStepStatus = "已完成";
                 SafetyStepStatus = "已完成";
@@ -192,8 +233,10 @@ namespace AIGeekTuner.ViewModels
                 if (_applicationSettingsService.Current.AutoSaveDiagnosisHistory)
                 {
                     StatusMessage = "诊断完成，正在保存本地报告...";
-                    await _diagnosisHistoryService.SaveAsync(
+                    await _diagnosisHistoryService.SaveSuccessAsync(
                         outcome,
+                        configuration.Ollama.ModelName,
+                        diagnosisStopwatch.ElapsedMilliseconds,
                         cancellationToken);
                     StatusMessage = "诊断、安全检查与本地报告保存已完成";
                 }
@@ -202,8 +245,49 @@ namespace AIGeekTuner.ViewModels
                     StatusMessage = "诊断与安全检查已完成；本次报告未自动保存";
                 }
 
-                _navigationService.NavigateTo(AppPage.Result, outcome);
+                if (_navigationService.IsCurrent(AppPage.Diagnosis))
+                {
+                    _navigationService.NavigateTo(AppPage.Result, outcome);
+                }
+                else
+                {
+                    // 用户已离开诊断页：不强行拉回；
+                    // 结果已写入 LatestDiagnosisState，可通过侧栏「诊断报告」入口查看。
+                    StatusMessage = "诊断已完成，结果已保留在「诊断报告」入口";
+                }
             });
+        }
+
+        private async Task TrySaveFailureHistorySilentlyAsync(
+            string failureCode,
+            string failureReason,
+            DiagnosticConfiguration configuration,
+            long elapsedMs,
+            CancellationToken cancellationToken)
+        {
+            // AutoSave 关闭时成功与失败都不落库，保持语义一致。
+            if (!_applicationSettingsService.Current.AutoSaveDiagnosisHistory)
+            {
+                return;
+            }
+
+            try
+            {
+                await _diagnosisHistoryService.SaveFailureAsync(
+                    new DiagnosisFailureInfo(
+                        DateTimeOffset.Now,
+                        configuration.Ollama.ModelName,
+                        elapsedMs,
+                        failureCode,
+                        failureReason,
+                        _selectedFaultLog?.FileName),
+                    cancellationToken);
+            }
+            catch (Exception saveFailure)
+            {
+                // 失败留痕属于尽力而为；任何保存异常不得掩盖原始诊断错误。
+                ExceptionLogWriter.Write(saveFailure, "DiagnosisViewModel.SaveFailureHistory");
+            }
         }
 
         private FaultLog CreateFaultLog()

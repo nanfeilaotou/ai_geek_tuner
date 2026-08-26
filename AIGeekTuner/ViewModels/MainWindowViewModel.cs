@@ -6,18 +6,24 @@ namespace AIGeekTuner.ViewModels
 {
     public sealed class MainWindowViewModel : ViewModelBase
     {
+        private readonly INavigationService _navigationService;
+        private AppPage? _currentPage;
+
         public MainWindowViewModel(INavigationService navigationService)
         {
             ArgumentNullException.ThrowIfNull(navigationService);
-            ShowDashboardCommand = Navigate(navigationService, AppPage.Dashboard);
-            ShowHardwareCommand = Navigate(navigationService, AppPage.Hardware);
-            ShowDiagnosisCommand = Navigate(navigationService, AppPage.Diagnosis);
-            ShowResultCommand = Navigate(navigationService, AppPage.Result);
-            ShowHistoryCommand = Navigate(navigationService, AppPage.History);
-            ShowSettingsCommand = Navigate(navigationService, AppPage.Settings);
+            _navigationService = navigationService;
+
+            ShowDashboardCommand = NavigateTo(AppPage.Dashboard);
+            ShowHardwareCommand = NavigateTo(AppPage.Hardware);
+            ShowDiagnosisCommand = NavigateTo(AppPage.Diagnosis);
+            ShowResultCommand = NavigateTo(AppPage.Result);
+            ShowHistoryCommand = NavigateTo(AppPage.History);
+            ShowSettingsCommand = NavigateTo(AppPage.Settings);
         }
 
         public string Title => "AI-GeekTuner";
+
         public ICommand ShowDashboardCommand { get; }
         public ICommand ShowHardwareCommand { get; }
         public ICommand ShowDiagnosisCommand { get; }
@@ -25,7 +31,16 @@ namespace AIGeekTuner.ViewModels
         public ICommand ShowHistoryCommand { get; }
         public ICommand ShowSettingsCommand { get; }
 
-        private static ICommand Navigate(INavigationService navigationService, AppPage page) =>
-            new RelayCommand(() => navigationService.NavigateTo(page));
+        /// <summary>当前页面名称（与导航按钮 Tag 匹配，用于选中态样式）。</summary>
+        public string CurrentPageName =>
+            _currentPage?.ToString() ?? string.Empty;
+
+        private ICommand NavigateTo(AppPage page) =>
+            new RelayCommand(() =>
+            {
+                _currentPage = page;
+                OnPropertyChanged(nameof(CurrentPageName));
+                _navigationService.NavigateTo(page);
+            });
     }
 }

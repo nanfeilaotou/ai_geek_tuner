@@ -109,6 +109,8 @@
         </Style>
     </Page.Resources>
 
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  HorizontalScrollBarVisibility="Disabled">
     <Grid Margin="28,24,28,28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -147,7 +149,8 @@
                             <TextBlock Text="故障日志" Style="{StaticResource SectionTitleStyle}"/>
                             <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
                                 <TextBlock Text="{Binding LogInputStatus}" Foreground="#BEE7F5" FontSize="11"
-                                           TextTrimming="CharacterEllipsis" MaxWidth="480"/>
+                                           TextTrimming="CharacterEllipsis" MaxWidth="480"
+                                           ToolTip="{Binding LogInputStatus}"/>
                             </StackPanel>
                         </StackPanel>
                         <Button Grid.Column="1" Content="＋  导入 .txt / .log"
@@ -418,4 +421,5 @@
                    Foreground="{DynamicResource SecondaryTextBrush}"
                    FontSize="11" Margin="0,13,0,0"/>
     </Grid>
+    </ScrollViewer>
 </Page>

@@ -1,3 +1,4 @@
+using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
 using AIGeekTuner.Services.AI;
 using AIGeekTuner.Services.Safety;
@@ -7,34 +8,43 @@ namespace AIGeekTuner.Services.Diagnosis
     public sealed class DiagnosisService : IDiagnosisService
     {
         private readonly IAiService _aiService;
+        private readonly IAiReadinessService _readinessService;
         private readonly DiagnosisPromptBuilder _promptBuilder;
         private readonly ISafetyService _safetyService;
 
         public DiagnosisService(
             IAiService aiService,
+            IAiReadinessService readinessService,
             DiagnosisPromptBuilder promptBuilder,
             ISafetyService safetyService)
         {
             _aiService = aiService ?? throw new ArgumentNullException(nameof(aiService));
+            _readinessService = readinessService ?? throw new ArgumentNullException(nameof(readinessService));
             _promptBuilder = promptBuilder ?? throw new ArgumentNullException(nameof(promptBuilder));
             _safetyService = safetyService ?? throw new ArgumentNullException(nameof(safetyService));
         }
 
         public async Task<DiagnosisOutcome> DiagnoseAsync(
             DiagnosticRequest request,
+            DiagnosticConfiguration configuration,
             CancellationToken cancellationToken = default)
         {
+            ArgumentNullException.ThrowIfNull(configuration);
             ValidateRequest(request);
             cancellationToken.ThrowIfCancellationRequested();
 
-            await EnsureOllamaAvailableAsync(cancellationToken);
+            // 本次诊断全程只使用调用方传入的这一份配置快照：
+            // readiness、prompt 截断上限、模型请求全部取自 configuration。
+            await EnsureReadyAsync(configuration.Ollama, cancellationToken);
 
             string systemPrompt;
             string userContext;
             try
             {
                 systemPrompt = _promptBuilder.BuildSystemPrompt();
-                userContext = _promptBuilder.BuildUserContext(request);
+                userContext = _promptBuilder.BuildUserContext(
+                    request,
+                    configuration.Input);
             }
             catch (Exception exception)
             {
@@ -50,6 +60,7 @@ namespace AIGeekTuner.Services.Diagnosis
                 aiResult = await _aiService.GetDiagnosticResultAsync(
                     systemPrompt,
                     userContext,
+                    configuration.Ollama,
                     cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -127,16 +138,28 @@ namespace AIGeekTuner.Services.Diagnosis
             };
         }
 
-        private async Task EnsureOllamaAvailableAsync(
+        private async Task EnsureReadyAsync(
+            OllamaOptions options,
             CancellationToken cancellationToken)
         {
             try
             {
-                if (!await _aiService.IsAvailableAsync(cancellationToken))
+                var readiness = await _readinessService.CheckReadinessAsync(
+                    options,
+                    cancellationToken);
+
+                switch (readiness.Status)
                 {
-                    throw new DiagnosisException(
-                        DiagnosisError.OllamaUnavailable,
-                        "本地 Ollama 服务不可用，请确认服务已经启动。");
+                    case AiReadinessStatus.Ready:
+                        return;
+                    case AiReadinessStatus.ModelMissing:
+                        throw new DiagnosisException(
+                            DiagnosisError.OllamaUnavailable,
+                            readiness.Message);
+                    default:
+                        throw new DiagnosisException(
+                            DiagnosisError.OllamaUnavailable,
+                            readiness.Message);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

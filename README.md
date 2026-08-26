@@ -1,81 +1,107 @@
-# AI-GeekTuner
+# AIGeekTuner
 
-一个使用本地 Ollama 辅助分析 PC 硬件故障日志的 .NET 8 WPF 应用。
+基于 .NET 8 WPF 与本地 Ollama 的 AI 硬件故障诊断工具。
 
-## 🧭 Overview
+导入故障日志，结合本机真实硬件信息，由本地大模型生成结构化诊断结论——全部计算在本机完成，不需要任何云端 API Key。
 
-应用围绕一条完整但克制的本地诊断流程展开：读取 Windows 硬件信息，导入或粘贴故障日志，构造带有系统上下文的 Prompt，调用本机 Ollama，然后解析结构化诊断结果并交给 SafetyGuard 复核。程序不会自动修改 BIOS、电压、超频参数或系统保护设置。
+## Features
 
-硬件静态信息来自 WMI，实时温度、负载、频率与功耗等数据来自 LibreHardwareMonitor。传感器读取是可选能力；驱动、权限或硬件不支持时，界面会保留缺失状态，不会用模拟值填充。AI 输入和诊断历史默认保存在本机，不依赖云端账号或外部数据库。
+- 硬件信息采集（CPU / GPU / 内存 / 磁盘 / 操作系统，基于 WMI）
+- 实时传感器读取（温度 / 功耗 / 频率，基于 LibreHardwareMonitor，可选能力）
+- 故障日志导入（.txt / .log，UTF-8 / UTF-16 / GB18030 自动识别）
+- 本地 Ollama 结构化诊断（JSON mode + 解析校验 + 一次自动修复）
+- SafetyGuard 安全复核（危险电压 / 危险操作 / 过度自信拦截）
+- 证据分层展示（事实 Fact 与推测 Inference 分开）
+- 设置持久化（服务地址 / 模型 / 超时 / 输入上限等，保存后立即生效）
+- 历史记录（成功与失败均留痕：模型、耗时、失败原因）+ Markdown 报告导出
+- 本地优先：默认诊断流程完全在本机完成
 
-## 📷 Screenshots
+## Architecture
 
-当前目录没有可公开使用的真实运行截图，因此 README 不放置生成图或界面 mockup。建议截图页面和隐私检查项记录在 [`docs/screenshots/README.md`](docs/screenshots/README.md)，发布前可在实际运行环境补充。
-
-## Tech Stack
-
-| 部分 | 实际使用的技术 |
-| --- | --- |
-| Runtime / UI | .NET 8、C#、WPF |
-| UI 组织 | MVVM-style ViewModel、Command、Frame 导航 |
-| 硬件信息 | WMI、`System.Management` |
-| 实时传感器 | LibreHardwareMonitorLib |
-| 本地 AI | Ollama `/api/tags`、`/api/chat` |
-| 本地存储 | JSON 历史记录、JSON 设置、Markdown 报告 |
-
-## 🧩 Architecture
-
-`Views` 只负责 WPF 页面与少量生命周期事件，界面状态和操作集中在 `ViewModels`。`Services` 按硬件检测、日志读取、AI、诊断编排、安全检查、历史记录、报告导出和设置拆分；`Models` 保存这些服务之间传递的结构化数据。
-
-```text
-AIGeekTuner/
-├─ Commands/             # 同步与异步 ICommand
-├─ Configuration/        # Ollama、输入长度和 SafetyGuard 默认配置
-├─ KnowledgeBase/        # 按日志关键词匹配的本地参考条目
-├─ Models/               # 硬件、日志、诊断与安全结果
-├─ Services/
-│  ├─ AI/                # Ollama HTTP 调用
-│  ├─ Diagnosis/         # Prompt、解析与诊断编排
-│  ├─ Hardware/          # WMI 与传感器读取
-│  ├─ Safety/            # 本地规则复核
-│  ├─ History/           # JSON 历史记录
-│  └─ Reports/           # Markdown 报告导出
-├─ ViewModels/
-└─ Views/
+```mermaid
+flowchart TD
+    A[UI: WPF Pages] --> B[DiagnosisViewModel]
+    B --> C[Hardware Detection WMI]
+    B --> D[Fault Log Reader]
+    B --> E[System Context]
+    B --> F[Knowledge Keywords]
+    B --> G[DiagnosisService]
+    G --> H[Readiness Preflight]
+    G --> I[DiagnosisPromptBuilder]
+    I --> J[Ollama /api/chat JSON mode]
+    J --> K[JSON Parser + Validate]
+    K -- parse fail --> L[One-time Repair Retry]
+    L --> K
+    K --> M[SafetyGuard Rules]
+    M --> N[Result Page]
+    N --> O[History JSON + Markdown Export]
 ```
 
-## 🔍 Core Workflow
+## Reliability & Safety
 
-诊断页接收 `.txt`、`.log` 或粘贴文本。文件读取器限制文件类型和大小，并识别 UTF-8、UTF-16 LE 与 UTF-16 BE；过长日志在进入 Prompt 前保留开头和结尾，并明确标记中间内容已省略。
+### Anti-hallucination
 
-诊断服务先确认本地 Ollama 可用，再把真实硬件字段、辅助系统上下文、匹配到的本地知识条目和故障日志序列化为输入。Prompt 要求模型区分 `Fact` 与 `Inference`，并只返回指定 JSON。解析器会移除常见 `<think>` 块、提取第一个有效 JSON 对象，并检查置信度、枚举和必需字段。
+Prompt 明确要求：AI 只能引用日志原文或真实采集到的硬件字段作为“事实”，禁止编造未采集的温度、电压、功耗、BIOS、超频状态；推测必须标注为 Inference 并给出验证建议；证据不足时输出固定句式并降低 confidence。
 
-SafetyGuard 是本地规则层，不替代专业硬件判断。当前规则会拦截明显异常的电压建议和禁用保护机制的表达；低置信度结果若使用绝对确定性措辞，会以警告状态展示。被拒绝的结果不会在 UI 中显示建议操作。
+### Structured Output
 
-诊断完成后可自动保存历史记录，也可导出 Markdown 报告。默认本地数据目录为 `%LOCALAPPDATA%\AI-GeekTuner`，旧版本 `%APPDATA%\AI-GeekTuner` 下的设置与历史只做一次兼容迁移。
+- 强类型 DiagnosticResult schema + 必填字段 / 枚举 / confidence 范围校验
+- Ollama 原生 `format: "json"` 模式
+- 平衡扫描器从模型输出中提取首个合法 JSON 对象（容忍 code fence / 前后噪声 / think 标签）
+- 校验失败自动发起最多一次 repair 重试，携带原输出与结构错误反馈
 
-## 🚀 Getting Started
+### SafetyGuard
 
-需要 Windows 10/11、.NET 8 SDK 和本机 Ollama。默认模型为 `qwen3:8b`，默认服务地址为 `http://localhost:11434`。
+本地规则层对 AI 结论复核：
 
-```powershell
-ollama pull qwen3:8b
-ollama serve
+- 异常电压建议（如 >1.70V）→ 拦截
+- 禁用保护机制 / 绕过安全限制类建议 → 拦截
+- 低置信度 + 绝对化措辞 → 警告展示
+
+### Failure handling
+
+Ollama 未启动、模型缺失、请求超时、AI 输出无效、settings.json / records.json 损坏——全部有明确的用户提示与自愈策略，不会崩溃或永久不可用。
+
+## Tests
+
+运行：
+
+```bash
+dotnet test
 ```
 
-另开终端恢复、构建并运行应用：
+共 117 个自动化测试，覆盖：JSON Parser、Prompt 构建、SafetyGuard 规则、Ollama repair 与 JSON mode、设置持久化、运行时快照隔离、FileReader 编码、History 存储与损坏恢复、页面构造冒烟。未声明覆盖率指标。
 
-```powershell
-dotnet restore .\AIGeekTuner.sln
-dotnet build .\AIGeekTuner.sln -c Release
-dotnet run --project .\AIGeekTuner\AIGeekTuner.csproj
+## Quick Start
+
+### Requirements
+
+- Windows 10 / 11
+- [Ollama](https://ollama.com) 已安装并运行
+- 推荐模型：`ollama pull qwen3:8b`
+- .NET 8 Desktop Runtime（仅 framework-dependent 发布产物需要）
+
+### 从源码运行
+
+```bash
+git clone <repo>
+cd AIGeekTuner
+dotnet run --project AIGeekTuner/AIGeekTuner.csproj
 ```
 
-若 Ollama 已由桌面应用或系统服务启动，不需要重复执行 `ollama serve`。设置页可以测试连接，并显示当前模型、超时和日志输入限制；这些参数当前来自代码中的默认配置，尚未提供 UI 编辑入口。
+### 发布产物
 
-## Notes and Limitations
+发布与演示说明见 [docs/DEMO.md](docs/DEMO.md)。
 
-应用只支持 Windows，WMI 或硬件传感器能否返回数据取决于设备、驱动和权限。它读取文本日志，不解析二进制 Minidump，也不调用 WinDbg。内置知识库只是关键词召回的辅助上下文，不是本机检测结论。
+## Privacy
 
-本地模型输出具有不确定性。结构化 Prompt、JSON 校验和 SafetyGuard 能减少明显问题，但不能保证诊断正确，也不能代替厂商检测或专业维修。项目目前没有接入正式测试框架；源码中的 `*Test.cs` 是手动验证辅助类，不应视为自动化测试套件。
+默认诊断流程完全在本机完成：硬件信息、日志文本与推理请求都只发送给本机 Ollama 服务，不要求云端 API Key。操作系统与用户环境本身不在项目可控范围内。
 
+## Limitations
+
+- 当前仅支持 Ollama Provider
+- 诊断建议为辅助参考，不替代专业硬件维修
+- WMI / LibreHardwareMonitor 的部分字段取决于硬件、驱动与管理员权限，读不到就以“未检测到”呈现，不会伪造
+- 不执行任何 BIOS / 超频 / 电压修改操作
+- 不解析 Minidump 二进制文件
+- AI 可能判断错误：请结合 confidence、事实与推测分区自行判断

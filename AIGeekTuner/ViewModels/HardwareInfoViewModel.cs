@@ -14,24 +14,24 @@ namespace AIGeekTuner.ViewModels
         private string _deviceModel = "正在读取...";
         private string _systemSummary = "正在读取...";
         private string _runtimeStatus = "硬件检测进行中";
-        private string _cpuName = HardwareInfo.UnknownValue;
-        private string _cpuPhysicalCores = HardwareInfo.UnknownValue;
-        private string _cpuLogicalProcessors = HardwareInfo.UnknownValue;
-        private string _cpuMaxClock = HardwareInfo.UnknownValue;
-        private string _gpuNames = HardwareInfo.UnknownValue;
-        private string _gpuDetails = HardwareInfo.UnknownValue;
-        private string _memoryCapacity = HardwareInfo.UnknownValue;
-        private string _memoryManufacturers = HardwareInfo.UnknownValue;
-        private string _memorySpeeds = HardwareInfo.UnknownValue;
-        private string _memoryModuleCount = HardwareInfo.UnknownValue;
-        private string _motherboard = HardwareInfo.UnknownValue;
-        private string _motherboardManufacturer = HardwareInfo.UnknownValue;
-        private string _motherboardProduct = HardwareInfo.UnknownValue;
-        private string _storageDevices = HardwareInfo.UnknownValue;
-        private string _operatingSystem = HardwareInfo.UnknownValue;
-        private string _operatingSystemName = HardwareInfo.UnknownValue;
-        private string _operatingSystemVersion = HardwareInfo.UnknownValue;
-        private string _operatingSystemArchitecture = HardwareInfo.UnknownValue;
+        private string _cpuName = NotDetectedDisplay;
+        private string _cpuPhysicalCores = NotDetectedDisplay;
+        private string _cpuLogicalProcessors = NotDetectedDisplay;
+        private string _cpuMaxClock = NotDetectedDisplay;
+        private string _gpuNames = NotDetectedDisplay;
+        private string _gpuDetails = NotDetectedDisplay;
+        private string _memoryCapacity = NotDetectedDisplay;
+        private string _memoryManufacturers = NotDetectedDisplay;
+        private string _memorySpeeds = NotDetectedDisplay;
+        private string _memoryModuleCount = NotDetectedDisplay;
+        private string _motherboard = NotDetectedDisplay;
+        private string _motherboardManufacturer = NotDetectedDisplay;
+        private string _motherboardProduct = NotDetectedDisplay;
+        private string _storageDevices = NotDetectedDisplay;
+        private string _operatingSystem = NotDetectedDisplay;
+        private string _operatingSystemName = NotDetectedDisplay;
+        private string _operatingSystemVersion = NotDetectedDisplay;
+        private string _operatingSystemArchitecture = NotDetectedDisplay;
         private string _detectedAt = "--";
         private string _sensorStatus = "等待读取实时传感器";
         private string _sensorCapturedAt = "--";
@@ -132,8 +132,8 @@ namespace AIGeekTuner.ViewModels
             {
                 HasError = true;
                 RuntimeStatus = "硬件信息读取失败";
-                DeviceModel = HardwareInfo.UnknownValue;
-                SystemSummary = HardwareInfo.UnknownValue;
+                DeviceModel = NotDetectedDisplay;
+                SystemSummary = NotDetectedDisplay;
             }
             finally
             {
@@ -172,14 +172,14 @@ namespace AIGeekTuner.ViewModels
                 " 线程");
             CpuMaxClock = hardware.CpuMaxClockSpeedMHz.HasValue
                 ? $"{hardware.CpuMaxClockSpeedMHz.Value} MHz"
-                : HardwareInfo.UnknownValue;
+                : NotDetectedDisplay;
 
             GpuNames = JoinKnown(hardware.GpuNames);
             GpuDetails = JoinKnown(hardware.GpuNames, Environment.NewLine);
 
             MemoryCapacity = hardware.TotalMemoryBytes is > 0
                 ? FormatBytes(hardware.TotalMemoryBytes.Value)
-                : HardwareInfo.UnknownValue;
+                : NotDetectedDisplay;
             MemoryManufacturers = JoinKnown(hardware.MemoryManufacturers);
             MemorySpeeds = hardware.MemorySpeedsMHz.Count > 0
                 ? string.Join(
@@ -187,10 +187,10 @@ namespace AIGeekTuner.ViewModels
                     hardware.MemorySpeedsMHz
                         .Distinct()
                         .Select(speed => $"{speed} MHz"))
-                : HardwareInfo.UnknownValue;
+                : NotDetectedDisplay;
             MemoryModuleCount = hardware.MemoryModuleCount.HasValue
                 ? $"{hardware.MemoryModuleCount.Value} 条"
-                : HardwareInfo.UnknownValue;
+                : NotDetectedDisplay;
 
             MotherboardManufacturer = Known(hardware.MotherboardManufacturer);
             MotherboardProduct = Known(hardware.MotherboardProduct);
@@ -291,14 +291,14 @@ namespace AIGeekTuner.ViewModels
             value.HasValue ? $"{value.Value:0.###} V" : null;
 
         private static string FormatCount(uint? value, string suffix) =>
-            value.HasValue ? $"{value.Value}{suffix}" : HardwareInfo.UnknownValue;
+            value.HasValue ? $"{value.Value}{suffix}" : Display(HardwareInfo.UnknownValue);
 
         private static string FormatStorageDevices(
             IReadOnlyList<StorageDeviceInfo> devices)
         {
             if (devices.Count == 0)
             {
-                return HardwareInfo.UnknownValue;
+                return Display(HardwareInfo.UnknownValue);
             }
 
             return string.Join(
@@ -307,7 +307,7 @@ namespace AIGeekTuner.ViewModels
                 {
                     var capacity = device.CapacityBytes.HasValue
                         ? FormatBytes(device.CapacityBytes.Value)
-                        : HardwareInfo.UnknownValue;
+                        : NotDetectedDisplay;
                     return $"{Known(device.Model)}  ·  {capacity}  ·  {Known(device.MediaType)}";
                 }));
         }
@@ -315,10 +315,18 @@ namespace AIGeekTuner.ViewModels
         private static string FormatBytes(ulong bytes) =>
             $"{bytes / 1024d / 1024d / 1024d:0.##} GB";
 
+        // 展示层专用：业务层哨兵值 “Unknown” 在界面上统一显示为中文。
+        private const string NotDetectedDisplay = "未检测到";
+
+        private static string Display(string value) =>
+            string.Equals(value, HardwareInfo.UnknownValue, StringComparison.OrdinalIgnoreCase)
+                ? NotDetectedDisplay
+                : value;
+
         private static string Known(string? value) =>
             string.IsNullOrWhiteSpace(value)
-                ? HardwareInfo.UnknownValue
-                : value;
+                ? Display(HardwareInfo.UnknownValue)
+                : Display(value);
 
         private static string JoinKnown(
             IEnumerable<string>? values,
@@ -330,7 +338,7 @@ namespace AIGeekTuner.ViewModels
                 .ToArray();
             return known?.Length > 0
                 ? string.Join(separator, known)
-                : HardwareInfo.UnknownValue;
+                : Display(HardwareInfo.UnknownValue);
         }
 
         private static string JoinParts(params string?[] values)
@@ -346,7 +354,7 @@ namespace AIGeekTuner.ViewModels
                 .ToArray();
             return parts.Length > 0
                 ? string.Join(" · ", parts)
-                : HardwareInfo.UnknownValue;
+                : NotDetectedDisplay;
         }
 
         private static bool HasKnownData(HardwareInfo hardware) =>

@@ -19,6 +19,22 @@ namespace AIGeekTuner.Services.Files
         private static readonly Encoding StrictUtf16BigEndian =
             new UnicodeEncoding(bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true);
 
+        // 多字节回退允许的最大控制类字符占比（排除制表符与换行）。
+        private const double MaxControlCharacterRatio = 0.05;
+
+        private static readonly Encoding StrictGb18030;
+
+        static FileReaderService()
+        {
+            // “gb18030”位于 Windows Desktop 运行时自带的 CodePages 表中，
+            // 必须显式注册后才能按名称取用；注册幂等，重复调用无副作用。
+            Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+            StrictGb18030 = Encoding.GetEncoding(
+                "gb18030",
+                EncoderFallback.ExceptionFallback,
+                DecoderFallback.ExceptionFallback);
+        }
+
         private readonly FileReaderOptions _options;
 
         public FileReaderService(FileReaderOptions? options = null)
@@ -191,6 +207,15 @@ namespace AIGeekTuner.Services.Files
                                 : "UTF-16 BE");
                     }
 
+                    // 中文 Windows 传统 ANSI 日志多为 GBK/GB2312 字节序列；
+                    // GB18030 向下兼容它们，仅在严格 UTF 系全部失败后作为最后文本候选，
+                    // 且必须通过文本合理性检查，防止把明显二进制误收为日志。
+                    var gb18030Candidate = TryDecodeWithGb18030(bytes);
+                    if (gb18030Candidate is not null)
+                    {
+                        return gb18030Candidate;
+                    }
+
                     throw;
                 }
             }
@@ -198,9 +223,44 @@ namespace AIGeekTuner.Services.Files
             {
                 throw new FaultLogReadException(
                     FaultLogReadError.UnsupportedEncoding,
-                    "无法将日志解码为 UTF-8 或 UTF-16 文本。",
+                    "无法将日志解码为 UTF-8、UTF-16 或 GB18030 文本。",
                     exception);
             }
+        }
+
+        private static DecodedLog? TryDecodeWithGb18030(byte[] bytes)
+        {
+            string content;
+            try
+            {
+                content = StrictGb18030.GetString(bytes);
+            }
+            catch (DecoderFallbackException)
+            {
+                return null;
+            }
+
+            if (HasExcessiveControlCharacters(content))
+            {
+                return null;
+            }
+
+            return new DecodedLog(content, "GB18030");
+        }
+
+        private static bool HasExcessiveControlCharacters(string content)
+        {
+            var controlCount = 0;
+            foreach (var character in content)
+            {
+                if (char.IsControl(character) &&
+                    character is not ('\t' or '\n' or '\r'))
+                {
+                    controlCount++;
+                }
+            }
+
+            return controlCount > content.Length * MaxControlCharacterRatio;
         }
 
         private static Encoding? DetectBomlessUtf16(byte[] bytes)

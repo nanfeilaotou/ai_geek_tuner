@@ -1,8 +1,10 @@
+using System.Globalization;
 using System.IO;
 using System.Security;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AIGeekTuner.Models;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Storage;
 
 namespace AIGeekTuner.Services.History
@@ -13,6 +15,7 @@ namespace AIGeekTuner.Services.History
         private const string LegacyMigrationMarkerFileName =
             ".legacy-history-imported";
         private const string PastedLogName = "粘贴日志";
+        private const string CorruptBackupPrefix = "records.corrupt-";
 
         private static readonly JsonSerializerOptions JsonOptions = new()
         {
@@ -55,8 +58,10 @@ namespace AIGeekTuner.Services.History
             TryImportLegacyHistoryOnce();
         }
 
-        public async Task<DiagnosisRecord> SaveAsync(
+        public async Task<DiagnosisRecord> SaveSuccessAsync(
             DiagnosisOutcome outcome,
+            string modelName,
+            long durationMs,
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(outcome);
@@ -66,26 +71,20 @@ namespace AIGeekTuner.Services.History
             {
                 Directory.CreateDirectory(_reportsDirectory);
 
-                var outcomePath = Path.Combine(
-                    _reportsDirectory,
-                    $"{outcome.DiagnosisId:N}.json");
-                var record = CreateRecord(outcome, outcomePath);
+                var outcomePath = DetailPathFor(outcome.DiagnosisId);
+                var record = CreateSuccessRecord(outcome, modelName, durationMs, outcomePath);
 
-                await WriteJsonAtomicallyAsync(
-                    outcomePath,
-                    outcome,
-                    cancellationToken);
+                var detail = new DiagnosisHistoryDetail
+                {
+                    SchemaVersion = 2,
+                    Succeeded = true,
+                    Outcome = outcome,
+                    ModelName = modelName,
+                    DurationMs = durationMs
+                };
+                await WriteJsonAtomicallyAsync(outcomePath, detail, cancellationToken);
 
-                var records = await ReadRecordsCoreAsync(cancellationToken);
-                records.RemoveAll(item => item.DiagnosisId == record.DiagnosisId);
-                records.Add(record);
-                records.Sort((left, right) => right.CreatedAt.CompareTo(left.CreatedAt));
-
-                await WriteJsonAtomicallyAsync(
-                    _indexPath,
-                    records,
-                    cancellationToken);
-
+                await UpsertIndexAsync(record, cancellationToken);
                 return record;
             }
             catch (OperationCanceledException)
@@ -104,13 +103,92 @@ namespace AIGeekTuner.Services.History
             }
         }
 
+        public async Task<DiagnosisRecord> SaveFailureAsync(
+            DiagnosisFailureInfo failure,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(failure);
+
+            await _storageLock.WaitAsync(cancellationToken);
+            try
+            {
+                Directory.CreateDirectory(_reportsDirectory);
+
+                var diagnosisId = Guid.NewGuid();
+                var detailPath = DetailPathFor(diagnosisId);
+                var reason = TruncateReason(failure.FailureReason);
+
+                var detail = new DiagnosisHistoryDetail
+                {
+                    SchemaVersion = 2,
+                    Succeeded = false,
+                    FailureReason = reason,
+                    FailureCode = failure.FailureCode,
+                    ModelName = failure.ModelName,
+                    DurationMs = failure.DurationMs,
+                    CompletedAt = failure.CompletedAt.ToUniversalTime()
+                };
+                await WriteJsonAtomicallyAsync(detailPath, detail, cancellationToken);
+
+                var record = new DiagnosisRecord
+                {
+                    DiagnosisId = diagnosisId,
+                    CreatedAt = failure.CompletedAt.ToUniversalTime(),
+                    LogFileName = string.IsNullOrWhiteSpace(failure.LogFileName)
+                        ? PastedLogName
+                        : failure.LogFileName!,
+                    Summary = reason,
+                    RiskLevel = DiagnosticRiskLevel.Low,
+                    Confidence = 0,
+                    SafetyStatus = SafetyStatus.Pending,
+                    DiagnosisOutcomePath = detailPath,
+                    Succeeded = false,
+                    ModelName = failure.ModelName,
+                    DurationMs = failure.DurationMs,
+                    FailureReason = reason
+                };
+
+                await UpsertIndexAsync(record, cancellationToken);
+                return record;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                throw new DiagnosisHistoryException(
+                    "诊断失败原因无法写入本地历史记录。请检查应用数据目录的访问权限。",
+                    exception);
+            }
+            finally
+            {
+                _storageLock.Release();
+            }
+        }
+
         public async Task<IReadOnlyList<DiagnosisRecord>> GetRecordsAsync(
             CancellationToken cancellationToken)
         {
             await _storageLock.WaitAsync(cancellationToken);
             try
             {
-                var records = await ReadRecordsCoreAsync(cancellationToken);
+                List<DiagnosisRecord> records;
+                try
+                {
+                    records = await ReadRecordsCoreAsync(cancellationToken);
+                }
+                catch (JsonException exception)
+                {
+                    // 索引损坏不允许让 History 永久瘫痪：
+                    // 留痕 → 备份坏索引 → 从详情文件尽可能重建。
+                    ExceptionLogWriter.Write(exception, "History index corrupt");
+                    BackupCorruptIndex();
+                    records = RebuildIndexFromDetails(cancellationToken);
+                    Directory.CreateDirectory(_reportsDirectory);
+                    await WriteJsonAtomicallyAsync(_indexPath, records, cancellationToken);
+                }
+
                 return records
                     .OrderByDescending(item => item.CreatedAt)
                     .ToArray();
@@ -122,7 +200,7 @@ namespace AIGeekTuner.Services.History
             catch (Exception exception) when (IsStorageException(exception))
             {
                 throw new DiagnosisHistoryException(
-                    "无法读取本地诊断历史记录。历史索引可能已损坏或当前目录不可访问。",
+                    "无法读取本地诊断历史记录。请检查应用数据目录的访问权限。",
                     exception);
             }
             finally
@@ -131,7 +209,7 @@ namespace AIGeekTuner.Services.History
             }
         }
 
-        public async Task<DiagnosisOutcome> LoadOutcomeAsync(
+        public async Task<DiagnosisHistoryDetail> LoadDetailAsync(
             DiagnosisRecord record,
             CancellationToken cancellationToken)
         {
@@ -140,32 +218,23 @@ namespace AIGeekTuner.Services.History
             await _storageLock.WaitAsync(cancellationToken);
             try
             {
-                var outcomePath = ValidateOutcomePath(record);
-                if (!File.Exists(outcomePath))
+                var detailPath = ValidateDetailPath(record);
+                if (!File.Exists(detailPath))
                 {
                     throw new FileNotFoundException(
                         "诊断报告文件不存在。",
-                        outcomePath);
+                        detailPath);
                 }
 
-                await using var stream = new FileStream(
-                    outcomePath,
-                    FileMode.Open,
-                    FileAccess.Read,
-                    FileShare.Read,
-                    bufferSize: 16 * 1024,
-                    useAsync: true);
-                var outcome = await JsonSerializer.DeserializeAsync<DiagnosisOutcome>(
-                    stream,
-                    JsonOptions,
-                    cancellationToken);
-
-                if (outcome is null || outcome.DiagnosisId != record.DiagnosisId)
+                var json = await File.ReadAllTextAsync(detailPath, cancellationToken);
+                var detail = ParseDetail(json);
+                if (detail.Succeeded && detail.Outcome is not null &&
+                    detail.Outcome.DiagnosisId != record.DiagnosisId)
                 {
                     throw new JsonException("诊断报告内容无效或与历史记录不匹配。");
                 }
 
-                return outcome;
+                return detail;
             }
             catch (OperationCanceledException)
             {
@@ -201,21 +270,16 @@ namespace AIGeekTuner.Services.History
                 var removedCount = records.RemoveAll(
                     item => item.DiagnosisId == diagnosisId);
 
-                var outcomePath = Path.Combine(
-                    _reportsDirectory,
-                    $"{diagnosisId:N}.json");
-                if (File.Exists(outcomePath))
+                var detailPath = DetailPathFor(diagnosisId);
+                if (File.Exists(detailPath))
                 {
-                    File.Delete(outcomePath);
+                    File.Delete(detailPath);
                 }
 
                 if (removedCount > 0)
                 {
                     Directory.CreateDirectory(_reportsDirectory);
-                    await WriteJsonAtomicallyAsync(
-                        _indexPath,
-                        records,
-                        cancellationToken);
+                    await WriteJsonAtomicallyAsync(_indexPath, records, cancellationToken);
                 }
             }
             catch (OperationCanceledException)
@@ -234,21 +298,58 @@ namespace AIGeekTuner.Services.History
             }
         }
 
-        private static DiagnosisRecord CreateRecord(
-            DiagnosisOutcome outcome,
-            string outcomePath) => new()
+        public async Task ClearAllAsync(CancellationToken cancellationToken = default)
         {
-            DiagnosisId = outcome.DiagnosisId,
-            CreatedAt = outcome.CompletedAt.ToUniversalTime(),
-            LogFileName = string.IsNullOrWhiteSpace(outcome.Request.FaultLog.FileName)
-                ? PastedLogName
-                : outcome.Request.FaultLog.FileName,
-            Summary = outcome.AiResult.Summary,
-            RiskLevel = outcome.AiResult.RiskLevel,
-            Confidence = Math.Clamp(outcome.AiResult.Confidence, 0, 1),
-            SafetyStatus = outcome.Safety.Status,
-            DiagnosisOutcomePath = outcomePath
-        };
+            await _storageLock.WaitAsync(cancellationToken);
+            try
+            {
+                if (!Directory.Exists(_reportsDirectory))
+                {
+                    return;
+                }
+
+                foreach (var file in Directory.GetFiles(_reportsDirectory))
+                {
+                    var name = Path.GetFileName(file);
+
+                    // 保留旧版迁移标记，否则下次启动会把旧数据再次导入。
+                    if (string.Equals(name, LegacyMigrationMarkerFileName,
+                            StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    File.Delete(file);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (IsStorageException(exception))
+            {
+                throw new DiagnosisHistoryException(
+                    "无法清空本地诊断历史，请检查应用数据目录的访问权限。",
+                    exception);
+            }
+            finally
+            {
+                _storageLock.Release();
+            }
+        }
+
+        private async Task UpsertIndexAsync(
+            DiagnosisRecord record,
+            CancellationToken cancellationToken)
+        {
+            var records = await ReadRecordsCoreAsync(cancellationToken);
+            records.RemoveAll(item => item.DiagnosisId == record.DiagnosisId);
+            records.Add(record);
+            records.Sort((left, right) => right.CreatedAt.CompareTo(left.CreatedAt));
+
+            Directory.CreateDirectory(_reportsDirectory);
+            await WriteJsonAtomicallyAsync(_indexPath, records, cancellationToken);
+        }
 
         private async Task<List<DiagnosisRecord>> ReadRecordsCoreAsync(
             CancellationToken cancellationToken)
@@ -272,7 +373,152 @@ namespace AIGeekTuner.Services.History
                    ?? [];
         }
 
-        private string ValidateOutcomePath(DiagnosisRecord record)
+        /// <summary>
+        /// 从详情文件重建索引：只信任详情本身；
+        /// 单个损坏/无关文件跳过并留痕，绝不让一条坏文件阻塞整个历史。
+        /// </summary>
+        private List<DiagnosisRecord> RebuildIndexFromDetails(
+            CancellationToken cancellationToken)
+        {
+            var rebuilt = new List<DiagnosisRecord>();
+            if (!Directory.Exists(_reportsDirectory))
+            {
+                return rebuilt;
+            }
+
+            foreach (var file in Directory.GetFiles(_reportsDirectory, "*.json"))
+            {
+                var fileName = Path.GetFileName(file);
+                if (fileName.StartsWith(CorruptBackupPrefix, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (!Guid.TryParseExact(
+                        Path.GetFileNameWithoutExtension(file),
+                        "N",
+                        out var diagnosisId))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    var detail = ParseDetail(File.ReadAllText(file));
+                    rebuilt.Add(BuildRecordFromDetail(diagnosisId, file, detail));
+                }
+                catch (Exception exception) when (
+                    exception is JsonException or ArgumentException)
+                {
+                    ExceptionLogWriter.Write(
+                        exception,
+                        $"History rebuild skipped {fileName}");
+                }
+            }
+
+            return rebuilt;
+        }
+
+        private static DiagnosisRecord BuildRecordFromDetail(
+            Guid diagnosisId,
+            string path,
+            DiagnosisHistoryDetail detail)
+        {
+            var completedAt = detail.CompletedAt != default
+                ? detail.CompletedAt
+                : File.GetLastWriteTimeUtc(path);
+
+            if (detail.Succeeded && detail.Outcome is not null)
+            {
+                var outcome = detail.Outcome;
+                return new DiagnosisRecord
+                {
+                    DiagnosisId = diagnosisId,
+                    CreatedAt = outcome.CompletedAt.ToUniversalTime(),
+                    LogFileName = string.IsNullOrWhiteSpace(outcome.Request.FaultLog.FileName)
+                        ? PastedLogName
+                        : outcome.Request.FaultLog.FileName!,
+                    Summary = outcome.AiResult.Summary,
+                    RiskLevel = outcome.AiResult.RiskLevel,
+                    Confidence = Math.Clamp(outcome.AiResult.Confidence, 0, 1),
+                    SafetyStatus = outcome.Safety.Status,
+                    DiagnosisOutcomePath = path,
+                    Succeeded = true,
+                    ModelName = detail.ModelName,
+                    DurationMs = detail.DurationMs
+                };
+            }
+
+            return new DiagnosisRecord
+            {
+                DiagnosisId = diagnosisId,
+                CreatedAt = completedAt.ToUniversalTime(),
+                LogFileName = PastedLogName,
+                Summary = detail.FailureReason ?? "(失败原因缺失)",
+                RiskLevel = DiagnosticRiskLevel.Low,
+                Confidence = 0,
+                SafetyStatus = SafetyStatus.Pending,
+                DiagnosisOutcomePath = path,
+                Succeeded = false,
+                ModelName = detail.ModelName,
+                DurationMs = detail.DurationMs,
+                FailureReason = detail.FailureReason
+            };
+        }
+
+        /// <summary>
+        /// 解析详情文本：优先 v2 封装；SchemaVersion 缺省时尝试旧版
+        /// “直接序列化 DiagnosisOutcome”并包装为成功封装。
+        /// </summary>
+        private static DiagnosisHistoryDetail ParseDetail(string json)
+        {
+            var envelope = JsonSerializer.Deserialize<DiagnosisHistoryDetail>(
+                json, JsonOptions);
+            if (envelope is not null && envelope.SchemaVersion == 2)
+            {
+                return envelope;
+            }
+
+            var legacy = JsonSerializer.Deserialize<DiagnosisOutcome>(json, JsonOptions);
+            if (legacy is not null)
+            {
+                return new DiagnosisHistoryDetail
+                {
+                    Succeeded = true,
+                    Outcome = legacy,
+                    ModelName = null,
+                    DurationMs = null
+                };
+            }
+
+            throw new JsonException("诊断报告内容无效。");
+        }
+
+        private static DiagnosisRecord CreateSuccessRecord(
+            DiagnosisOutcome outcome,
+            string modelName,
+            long durationMs,
+            string outcomePath) => new()
+        {
+            DiagnosisId = outcome.DiagnosisId,
+            CreatedAt = outcome.CompletedAt.ToUniversalTime(),
+            LogFileName = string.IsNullOrWhiteSpace(outcome.Request.FaultLog.FileName)
+                ? PastedLogName
+                : outcome.Request.FaultLog.FileName!,
+            Summary = outcome.AiResult.Summary,
+            RiskLevel = outcome.AiResult.RiskLevel,
+            Confidence = Math.Clamp(outcome.AiResult.Confidence, 0, 1),
+            SafetyStatus = outcome.Safety.Status,
+            DiagnosisOutcomePath = outcomePath,
+            Succeeded = true,
+            ModelName = modelName,
+            DurationMs = durationMs
+        };
+
+        private string DetailPathFor(Guid diagnosisId) =>
+            Path.Combine(_reportsDirectory, $"{diagnosisId:N}.json");
+
+        private string ValidateDetailPath(DiagnosisRecord record)
         {
             var expectedPath = Path.GetFullPath(Path.Combine(
                 _reportsDirectory,
@@ -288,6 +534,35 @@ namespace AIGeekTuner.Services.History
             }
 
             return expectedPath;
+        }
+
+        private static string TruncateReason(string reason)
+        {
+            var normalized = reason.Replace("\r", " ").Replace("\n", " ").Trim();
+            return normalized.Length <= 300
+                ? normalized
+                : normalized[..300] + "…";
+        }
+
+        private void BackupCorruptIndex()
+        {
+            try
+            {
+                if (!File.Exists(_indexPath))
+                {
+                    return;
+                }
+
+                var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture);
+                File.Move(
+                    _indexPath,
+                    Path.Combine(_reportsDirectory, $"{CorruptBackupPrefix}{stamp}.json"),
+                    overwrite: false);
+            }
+            catch (Exception backupFailure)
+            {
+                ExceptionLogWriter.Write(backupFailure, "History index backup");
+            }
         }
 
         private static async Task WriteJsonAtomicallyAsync<T>(
@@ -328,10 +603,10 @@ namespace AIGeekTuner.Services.History
         private static bool IsStorageException(Exception exception) =>
             exception is IOException
                 or UnauthorizedAccessException
+                or SecurityException
                 or JsonException
                 or NotSupportedException
-                or ArgumentException
-                or SecurityException;
+                or ArgumentException;
 
         private void TryImportLegacyHistoryOnce()
         {
@@ -427,7 +702,11 @@ namespace AIGeekTuner.Services.History
                             RiskLevel = legacyRecord.RiskLevel,
                             Confidence = legacyRecord.Confidence,
                             SafetyStatus = legacyRecord.SafetyStatus,
-                            DiagnosisOutcomePath = newOutcomePath
+                            DiagnosisOutcomePath = newOutcomePath,
+                            Succeeded = legacyRecord.Succeeded,
+                            ModelName = legacyRecord.ModelName,
+                            DurationMs = legacyRecord.DurationMs,
+                            FailureReason = legacyRecord.FailureReason
                         });
                         changed = true;
                     }
@@ -448,7 +727,11 @@ namespace AIGeekTuner.Services.History
                             RiskLevel = existing.RiskLevel,
                             Confidence = existing.Confidence,
                             SafetyStatus = existing.SafetyStatus,
-                            DiagnosisOutcomePath = newOutcomePath
+                            DiagnosisOutcomePath = newOutcomePath,
+                            Succeeded = existing.Succeeded,
+                            ModelName = existing.ModelName,
+                            DurationMs = existing.DurationMs,
+                            FailureReason = existing.FailureReason
                         };
                         changed = true;
                     }

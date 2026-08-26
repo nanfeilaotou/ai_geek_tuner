@@ -114,6 +114,69 @@
         </Setter>
     </Style>
 
+    <!--
+      导航选中态：Tag 存 AppPage 名称，与 MainWindowViewModel.CurrentPageName 比较一致即高亮。
+    -->
+    <Style x:Key="NavigationSelectedableStyle" TargetType="Button"
+           BasedOn="{StaticResource NavigationButtonStyle}">
+        <Style.Triggers>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="Dashboard"/>
+                    <Condition Binding="{Binding CurrentPageName}" Value="Dashboard"/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background" Value="#33FFFFFF"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+            </MultiDataTrigger>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="Hardware"/>
+                    <Condition Binding="{Binding CurrentPageName}" Value="Hardware"/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background" Value="#33FFFFFF"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+            </MultiDataTrigger>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="Diagnosis"/>
+                    <Condition Binding="{Binding CurrentPageName}" Value="Diagnosis"/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background" Value="#33FFFFFF"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+            </MultiDataTrigger>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="Result"/>
+                    <Condition Binding="{Binding CurrentPageName}" Value="Result"/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background" Value="#33FFFFFF"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+            </MultiDataTrigger>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="History"/>
+                    <Condition Binding="{Binding CurrentPageName}" Value="History"/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background" Value="#33FFFFFF"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+            </MultiDataTrigger>
+            <MultiDataTrigger>
+                <MultiDataTrigger.Conditions>
+                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=Tag}" Value="Settings"/>
+                    <Condition Binding="{Binding CurrentPageName}" Value="Settings"/>
+                </MultiDataTrigger.Conditions>
+                <Setter Property="Background" Value="#33FFFFFF"/>
+                <Setter Property="Foreground" Value="White"/>
+                <Setter Property="FontWeight" Value="SemiBold"/>
+            </MultiDataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <Style TargetType="ScrollBar">
         <Setter Property="Width" Value="10"/>
     </Style>

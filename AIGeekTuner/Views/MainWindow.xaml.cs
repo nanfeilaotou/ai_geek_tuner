@@ -37,9 +37,13 @@ namespace AIGeekTuner
         private readonly IDiagnosticKnowledgeService _knowledgeService;
         private readonly IApplicationSettingsService _applicationSettingsService;
         private readonly ILocalDataDirectoryService _localDataDirectoryService;
+        private readonly IOllamaConnectionService _connectionService;
         private readonly HardwareInfoViewModel _hardwareInfoViewModel;
         private readonly LatestDiagnosisState _latestDiagnosisState;
         private readonly SettingsViewModel _settingsViewModel;
+
+        /// <summary>运行时配置中心；设置页保存后整体换入新快照。</summary>
+        internal DiagnosticConfigurationStore ConfigurationStore { get; }
 
         public MainWindow()
         {
@@ -67,27 +71,48 @@ namespace AIGeekTuner
             _localDataDirectoryService = new LocalDataDirectoryService(
                 applicationDataPaths);
 
-            var ollamaOptions = new OllamaOptions();
-            var diagnosisInputOptions = new DiagnosisInputOptions();
+            // 运行时配置中心：设置页保存后 Replace 新快照，
+            // 下一次诊断立即生效；进行中的诊断持有旧快照不受影响。
+            ConfigurationStore = CreateConfigurationStore(_applicationSettingsService.Current);
+
             var aiService = new OllamaService(
                 _httpClient,
-                ollamaOptions,
+                () => ConfigurationStore.Snapshot().Ollama,
                 new DiagnosticResultParser());
+            _connectionService = new OllamaConnectionService(_httpClient);
             _settingsViewModel = new SettingsViewModel(
-                ollamaOptions,
-                diagnosisInputOptions,
-                aiService,
                 _applicationSettingsService,
+                _connectionService,
+                ConfigurationStore,
                 _localDataDirectoryService);
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(
                 aiService,
-                new DiagnosisPromptBuilder(diagnosisInputOptions),
+                new OllamaAiReadinessService(_connectionService),
+                new DiagnosisPromptBuilder(() => ConfigurationStore.Snapshot().Input),
                 safetyService);
 
             _navigationService = new FrameNavigationService(MainFrame, CreatePage);
             DataContext = new MainWindowViewModel(_navigationService);
             _navigationService.NavigateTo(AppPage.Dashboard);
+        }
+
+        private static DiagnosticConfigurationStore CreateConfigurationStore(
+            ApplicationSettings settings)
+        {
+            return new DiagnosticConfigurationStore(
+                new DiagnosticConfiguration(
+                    new OllamaOptions
+                    {
+                        BaseUrl = settings.OllamaBaseUrl,
+                        ModelName = settings.OllamaModelName,
+                        TimeoutSeconds = settings.OllamaTimeoutSeconds,
+                        UseJsonFormat = settings.UseJsonFormat
+                    },
+                    new DiagnosisInputOptions
+                    {
+                        MaxFaultLogCharacters = settings.MaxFaultLogCharacters
+                    }));
         }
 
         protected override void OnClosed(EventArgs e)
@@ -120,6 +145,7 @@ namespace AIGeekTuner
                         _systemContextCollector,
                         _knowledgeService,
                         _applicationSettingsService,
+                        ConfigurationStore,
                         _latestDiagnosisState)
                 },
                 AppPage.Result => new ResultPage

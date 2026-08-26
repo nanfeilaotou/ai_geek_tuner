@@ -33,24 +33,30 @@
                     <TextBlock Text="工具箱" Foreground="{DynamicResource MutedTextBrush}"
                                FontSize="11" Margin="12,0,0,10"/>
                     <Button Content="▣   仪表盘" Command="{Binding ShowDashboardCommand}"
-                            Style="{StaticResource NavigationButtonStyle}" Margin="0,2"/>
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Dashboard" Margin="0,2"/>
                     <Button Content="▤   硬件信息" Command="{Binding ShowHardwareCommand}"
-                            Style="{StaticResource NavigationButtonStyle}" Margin="0,2"/>
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Hardware" Margin="0,2"/>
                     <Button Content="✦   AI 智能诊断" Command="{Binding ShowDiagnosisCommand}"
-                            Style="{StaticResource NavigationButtonStyle}" Margin="0,2"/>
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Diagnosis" Margin="0,2"/>
                     <Button Content="▧   诊断报告" Command="{Binding ShowResultCommand}"
-                            Style="{StaticResource NavigationButtonStyle}" Margin="0,2"/>
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Result" Margin="0,2"/>
                     <Button Content="▤   日志管理" Command="{Binding ShowHistoryCommand}"
-                            Style="{StaticResource NavigationButtonStyle}" Margin="0,2"/>
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="History" Margin="0,2"/>
                     <Button Content="⚙   设置" Command="{Binding ShowSettingsCommand}"
-                            Style="{StaticResource NavigationButtonStyle}" Margin="0,2"/>
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Settings" Margin="0,2"/>
                 </StackPanel>
 
                 <StackPanel Grid.Row="2" Margin="22,18,18,22">
                     <Border Height="1" Background="#3978B5" Margin="0,0,0,14"/>
                     <TextBlock Text="LOCAL · PRIVATE · SAFE" FontSize="9"
                                Foreground="{DynamicResource MutedTextBrush}"/>
-                    <TextBlock Text="V1 本地诊断基础版" FontSize="11"
+                    <TextBlock Text="v1.0.0 · 本地诊断基础版" FontSize="11"
                                Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,4,0,0"/>
                 </StackPanel>
             </Grid>
