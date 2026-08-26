@@ -1,0 +1,30 @@
+<Window x:Class="AIGeekTuner.Views.DataSourcesDetailWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="860" Height="520" WindowStartupLocation="CenterOwner"
+        Background="#1B2A3A">
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <TextBlock Grid.Row="0" x:Name="VersionsText"
+                   Foreground="#ABDCEA" FontSize="12" Margin="0,0,0,10"/>
+        <DataGrid Grid.Row="1" x:Name="RowsGrid"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  Background="#122A3A" Foreground="#ECFAFF"
+                  BorderBrush="#33FFFFFF" HeadersVisibility="Column"
+                  FontSize="12" GridLinesVisibility="Horizontal"
+                  HorizontalGridLinesBrush="#22FFFFFF">
+            <DataGrid.Columns>
+                <DataGridTextColumn Header="来源" Binding="{Binding Source}" Width="110"/>
+                <DataGridTextColumn Header="Canonical 设备" Binding="{Binding CanonicalDevice}" Width="220"/>
+                <DataGridTextColumn Header="Native 设备 ID" Binding="{Binding NativeDeviceId}" Width="140"/>
+                <DataGridTextColumn Header="Native ID" Binding="{Binding NativeId}" Width="150"/>
+                <DataGridTextColumn Header="Native 标签" Binding="{Binding NativeLabel}" Width="170"/>
+                <DataGridTextColumn Header="值" Binding="{Binding ValueText}" Width="90"/>
+                <DataGridTextColumn Header="Canonical 指标" Binding="{Binding CanonicalMetric}" Width="180"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </Grid>
+</Window>

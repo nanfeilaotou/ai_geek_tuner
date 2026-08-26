@@ -202,6 +202,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Margin="0,0,0,20">
@@ -339,8 +340,75 @@
                 </StackPanel>
             </Border>
 
-            <!-- 03 历史与数据 -->
+            <!-- 03 硬件数据源（V2-M1） -->
             <Border Grid.Row="3" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock Text="硬件数据源" Style="{StaticResource SectionTitleStyle}"/>
+                            <TextBlock Text="AIGeekTuner 可读取可用的外部硬件监控数据，并保留数据来源；外部软件需用户自行安装与启用"
+                                       Style="{StaticResource SettingsHintStyle}" Margin="0,4,10,10"/>
+                        </StackPanel>
+                        <Button Grid.Column="1" Content="{Binding RefreshDataSourceButtonText}"
+                                Command="{Binding RefreshDataSourcesCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Padding="14,7" VerticalAlignment="Top"/>
+                    </Grid>
+
+                    <ItemsControl ItemsSource="{Binding DataSourceStatuses}" Margin="0,2,0,6">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Style="{StaticResource SettingsRowStyle}">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding StatusGlyph}"
+                                                   FontSize="12" VerticalAlignment="Center">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#6FA9C1"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding StatusKind}" Value="Ready">
+                                                            <Setter Property="Foreground" Value="#A9F2D0"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding StatusKind}" Value="Degraded">
+                                                            <Setter Property="Foreground" Value="#FFE08A"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding StatusKind}" Value="NeedsConfiguration">
+                                                            <Setter Property="Foreground" Value="#FFE08A"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding StatusKind}" Value="Error">
+                                                            <Setter Property="Foreground" Value="#FFD1D1"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                        <TextBlock Text="{Binding SourceName}"
+                                                   Foreground="#ECFAFF" FontSize="12"
+                                                   FontWeight="SemiBold" Margin="9,0,0,0"
+                                                   VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding DetailLine}"
+                                                   Foreground="#ABDCEA" FontSize="11"
+                                                   TextWrapping="Wrap" Margin="14,0,0,0"
+                                                   VerticalAlignment="Center" MaxWidth="430"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <TextBlock Text="{Binding DataSourceStatusLine}"
+                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,0"/>
+                    <TextBlock Text="HWiNFO / AIDA64 为可选数据源，未安装时内置传感器功能完全正常。"
+                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,0"/>
+                </StackPanel>
+            </Border>
+
+            <!-- 04 历史与数据 -->
+            <Border Grid.Row="4" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="历史与数据" Style="{StaticResource SectionTitleStyle}"/>
                     <TextBlock Text="诊断记录与本地数据均保留在本机"
@@ -391,7 +459,7 @@
             </Border>
 
             <!-- 底部保存区 -->
-            <Grid Grid.Row="4" Margin="0,18,0,0">
+            <Grid Grid.Row="5" Margin="0,18,0,0">
                 <Button Content="保存设置"
                         Command="{Binding SaveCommand}"
                         Style="{StaticResource TechButtonStyle}"

@@ -5,6 +5,8 @@
       Title="HardwareInfoPage" Background="Transparent"
       Loaded="OnLoaded">
     <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+
         <Style x:Key="HardwareGroupTitleStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="#ECFAFF"/>
             <Setter Property="FontSize" Value="14"/>
@@ -48,7 +50,7 @@
         </Style>
 
         <DataTemplate DataType="{x:Type viewModels:HardwareSensorItemViewModel}">
-            <Grid Margin="0,7,0,0">
+            <Grid Margin="0,7,0,0" ToolTip="{Binding Source}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
@@ -60,6 +62,27 @@
                            Margin="16,0,0,0" VerticalAlignment="Center"/>
             </Grid>
         </DataTemplate>
+
+        <!-- 数据源状态行的状态色 -->
+        <Style x:Key="DataSourceGlyphStyle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="#6FA9C1"/>
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Ready">
+                    <Setter Property="Foreground" Value="#A9F2D0"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Degraded">
+                    <Setter Property="Foreground" Value="#FFE08A"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="NeedsConfiguration">
+                    <Setter Property="Foreground" Value="#FFE08A"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding StatusKind}" Value="Error">
+                    <Setter Property="Foreground" Value="#FFD1D1"/>
+                </DataTrigger>
+            </Style.Triggers>
+        </Style>
     </Page.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto"
@@ -384,6 +407,68 @@
                                 </Ellipse.Style>
                             </Ellipse>
                         </Grid>
+
+                        <!-- V2-M1 数据源状态（紧凑区） -->
+                        <Border Background="#08FFFFFF" Padding="13,10" Margin="0,0,0,9"
+                                Visibility="{Binding HasDataSources, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,6">
+                                    <TextBlock Text="数据源" Foreground="#9FD9EA"
+                                               FontSize="11" FontWeight="SemiBold"/>
+                                    <Button Content="查看数据源详情"
+                                            Click="OnShowDataSourcesDetail"
+                                            HorizontalAlignment="Right"
+                                            Background="Transparent" BorderThickness="0"
+                                            Foreground="#7FB6CB" FontSize="10" Cursor="Hand"/>
+                                </Grid>
+                                <ItemsControl ItemsSource="{Binding DataSources}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <StackPanel Orientation="Horizontal" Margin="0,3">
+                                                <TextBlock Text="{Binding StatusGlyph}"
+                                                           Style="{StaticResource DataSourceGlyphStyle}"/>
+                                                <TextBlock Text="{Binding SourceName}"
+                                                           Foreground="#ECFAFF" FontSize="11"
+                                                           FontWeight="SemiBold" Margin="8,0,0,0"
+                                                           VerticalAlignment="Center"/>
+                                                <TextBlock Text="{Binding DetailLine}"
+                                                           Foreground="#A9D9E9" FontSize="10"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxWidth="190" Margin="10,0,0,0"
+                                                           VerticalAlignment="Center"
+                                                           ToolTip="{Binding DetailLine}"/>
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- V2-M1 canonical 核心指标 -->
+                        <Border Background="#0AFFFFFF" Padding="14,12" Margin="0,0,0,9"
+                                Visibility="{Binding HasCoreMetrics, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="实时数据 · 核心指标"
+                                           Foreground="#D9F7FF" FontSize="12"
+                                           FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                <ItemsControl ItemsSource="{Binding CoreMetricGroups}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type viewModels:HardwareSensorGroupViewModel}">
+                                            <Border Style="{StaticResource SensorGroupStyle}">
+                                                <StackPanel>
+                                                    <TextBlock Text="{Binding Title}" Foreground="#D9F7FF"
+                                                               FontSize="12" FontWeight="SemiBold"/>
+                                                    <ItemsControl ItemsSource="{Binding Items}"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                                <TextBlock Text="来源见各项悬停提示；同一指标按固定优先级选择数据源，不做多源平均。"
+                                           Foreground="#7FB6CB" FontSize="9" Margin="0,6,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
 
                         <ItemsControl ItemsSource="{Binding SensorGroups}">
                             <ItemsControl.ItemTemplate>

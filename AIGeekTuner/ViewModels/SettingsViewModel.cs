@@ -1,9 +1,11 @@
 using System.Collections.ObjectModel;
+using System.Windows.Input;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Services.AI;
 using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Settings;
+using AIGeekTuner.Services.Telemetry;
 
 namespace AIGeekTuner.ViewModels
 {
@@ -25,6 +27,13 @@ namespace AIGeekTuner.ViewModels
         private readonly IOllamaConnectionService _connectionService;
         private readonly DiagnosticConfigurationStore _configurationStore;
         private readonly ILocalDataDirectoryService _localDataDirectoryService;
+        private readonly ITelemetryHub? _telemetryHub;
+
+        private readonly AsyncRelayCommand _refreshDataSourcesCommand;
+
+        private bool _isRefreshingDataSources;
+
+        private string _dataSourceStatusLine = "正在检测硬件数据源...";
 
         private readonly AsyncRelayCommand _saveCommand;
         private readonly AsyncRelayCommand _refreshModelsCommand;
@@ -48,12 +57,14 @@ namespace AIGeekTuner.ViewModels
             IApplicationSettingsService settingsService,
             IOllamaConnectionService connectionService,
             DiagnosticConfigurationStore configurationStore,
-            ILocalDataDirectoryService localDataDirectoryService)
+            ILocalDataDirectoryService localDataDirectoryService,
+            ITelemetryHub? telemetryHub = null)
         {
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
             _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
             _localDataDirectoryService = localDataDirectoryService ?? throw new ArgumentNullException(nameof(localDataDirectoryService));
+            _telemetryHub = telemetryHub;
 
             var current = settingsService.Current;
             _baseUrl = current.OllamaBaseUrl;
@@ -67,6 +78,75 @@ namespace AIGeekTuner.ViewModels
             _refreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsLoadingModels);
             _testConnectionCommand = new AsyncRelayCommand(TestConnectionAsync, () => !IsTestingConnection);
             OpenDataDirectoryCommand = new RelayCommand(OpenDataDirectory);
+            _refreshDataSourcesCommand = new AsyncRelayCommand(
+                RefreshDataSourceStatusesAsync,
+                () => !IsRefreshingDataSources);
+
+            // 打开设置页时自动检测一次；hub 未注入（旧测试/无遥测场景）时静默跳过。
+            if (_telemetryHub is not null)
+            {
+                _ = RefreshDataSourceStatusesAsync();
+            }
+        }
+
+        /// <summary>硬件数据源状态（V2-M1：只读展示 + 刷新检测，无可配置项）。</summary>
+        public ObservableCollection<TelemetrySourceStatusViewModel> DataSourceStatuses { get; } = [];
+
+        public ICommand RefreshDataSourcesCommand => _refreshDataSourcesCommand;
+
+        public string DataSourceStatusLine
+        {
+            get => _dataSourceStatusLine;
+            private set => SetProperty(ref _dataSourceStatusLine, value);
+        }
+
+        public bool IsRefreshingDataSources
+        {
+            get => _isRefreshingDataSources;
+            private set
+            {
+                if (SetProperty(ref _isRefreshingDataSources, value))
+                {
+                    _refreshDataSourcesCommand.NotifyCanExecuteChanged();
+                    OnPropertyChanged(nameof(RefreshDataSourceButtonText));
+                }
+            }
+        }
+
+        public string RefreshDataSourceButtonText =>
+            IsRefreshingDataSources ? "检测中..." : "刷新检测";
+
+        private async Task RefreshDataSourceStatusesAsync()
+        {
+            IsRefreshingDataSources = true;
+            try
+            {
+                var hub = _telemetryHub;
+                if (hub is null)
+                {
+                    DataSourceStatusLine = "遥测聚合未启用。";
+                    return;
+                }
+
+                var snapshot = await hub.ReadAsync();
+                DataSourceStatuses.Clear();
+                foreach (var report in snapshot.Sources)
+                {
+                    DataSourceStatuses.Add(new TelemetrySourceStatusViewModel(report));
+                }
+
+                var readyCount = snapshot.Sources.Count(report =>
+                    report.Status == Models.Telemetry.TelemetrySourceStatus.Ready);
+                DataSourceStatusLine = $"检测完成 · {readyCount}/{snapshot.Sources.Count} 个来源就绪。";
+            }
+            catch
+            {
+                DataSourceStatusLine = "检测失败，请重试。";
+            }
+            finally
+            {
+                IsRefreshingDataSources = false;
+            }
         }
 
         public string BaseUrl

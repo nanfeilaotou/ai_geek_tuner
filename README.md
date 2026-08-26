@@ -62,6 +62,21 @@ Prompt 明确要求：AI 只能引用日志原文或真实采集到的硬件字�
 
 Ollama 未启动、模型缺失、请求超时、AI 输出无效、settings.json / records.json 损坏——全部有明确的用户提示与自愈策略，不会崩溃或永久不可用。
 
+## Optional Telemetry Sources (V2-M1)
+
+AIGeekTuner 可读取可用的外部硬件监控数据，并保留数据来源；外部软件为可选项，未安装时内置传感器功能完全正常。
+
+| 来源 | 方式 | 说明 |
+| --- | --- | --- |
+| LibreHardwareMonitor | 内置 | 默认来源，无需额外安装 |
+| AIDA64 | WMI（Root\WMI\AIDA64_SensorValues） | 可选；需在 AIDA64 External Applications 中启用 |
+| HWiNFO | Shared Memory（7.0+ SM2 接口，官方已完全公开） | 可选；需用户安装 HWiNFO 并启用 Shared Memory Support。免费版连续共享约 12 小时后自动停用、需手动重开；AIGeekTuner 不捆绑 HWiNFO，也不会以任何方式规避该时限 |
+
+- AIDA64 / HWiNFO 需用户自行安装、启动并启用数据导出；AIGeekTuner 不捆绑、不下载、不自动修改它们的设置。
+- 同一物理设备的识别基于证据（强 ID / 单例 / 归一化名称唯一匹配）；证据不足的设备保留来源本地身份，不做跨源回退。
+- 同一指标按固定优先级（HWiNFO → AIDA64 → LibreHardwareMonitor）选择单一来源，不做多源平均，并保留来源溯源。
+- Hardware 页与 Settings 页可查看各数据源状态。
+
 ## Tests
 
 运行：
@@ -70,7 +85,7 @@ Ollama 未启动、模型缺失、请求超时、AI 输出无效、settings.json
 dotnet test
 ```
 
-共 117 个自动化测试，覆盖：JSON Parser、Prompt 构建、SafetyGuard 规则、Ollama repair 与 JSON mode、设置持久化、运行时快照隔离、FileReader 编码、History 存储与损坏恢复、页面构造冒烟。未声明覆盖率指标。
+共 182 个自动化测试，覆盖：JSON Parser、Prompt 构建、SafetyGuard 规则、Ollama repair 与 JSON mode、设置持久化、运行时快照隔离、FileReader 编码、History 存储与损坏恢复、页面构造冒烟，以及 V2-M1 遥测域 / 单位归一 / AIDA64 映射与 Provider 状态机 / TelemetryHub 优先级回退。未声明覆盖率指标。
 
 ## Quick Start
 
@@ -105,3 +120,4 @@ dotnet run --project AIGeekTuner/AIGeekTuner.csproj
 - 不执行任何 BIOS / 超频 / 电压修改操作
 - 不解析 Minidump 二进制文件
 - AI 可能判断错误：请结合 confidence、事实与推测分区自行判断
+- V2 后续模块（Recorder / PresentMon 会话 / 语音总结等）尚未实现

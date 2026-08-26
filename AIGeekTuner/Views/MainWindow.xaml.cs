@@ -16,6 +16,10 @@ using AIGeekTuner.Services.Knowledge;
 using AIGeekTuner.Services.Settings;
 using AIGeekTuner.Services.Reports;
 using AIGeekTuner.Services.Storage;
+using AIGeekTuner.Services.Telemetry;
+using AIGeekTuner.Services.Telemetry.Aida64;
+using AIGeekTuner.Services.Telemetry.HwInfo;
+using AIGeekTuner.Services.Telemetry.LibreHardwareMonitor;
 using AIGeekTuner.ViewModels;
 using AIGeekTuner.Views;
 
@@ -31,6 +35,7 @@ namespace AIGeekTuner
         private readonly IReportExportService _reportExportService;
         private readonly IHardwareDetectionService _hardwareDetectionService;
         private readonly IHardwareSensorService _hardwareSensorService;
+        private readonly ITelemetryHub _telemetryHub;
         private readonly IDiagnosisService _diagnosisService;
         private readonly IDiagnosisHistoryService _diagnosisHistoryService;
         private readonly ISystemContextCollector _systemContextCollector;
@@ -58,9 +63,19 @@ namespace AIGeekTuner
                 applicationDataPaths);
             _hardwareDetectionService = new WmiHardwareDetectionService();
             _hardwareSensorService = new LibreHardwareMonitorSensorService();
+
+            // V2-M1 统一遥测层：固定优先级 HWiNFO → AIDA64 → LibreHardwareMonitor。
+            _telemetryHub = new TelemetryHub(new ITelemetryProvider[]
+            {
+                new HwInfoTelemetryProvider(new HwInfoSharedMemoryReader()),
+                new Aida64TelemetryProvider(new Aida64WmiSensorReader()),
+                new LibreHardwareMonitorTelemetryProvider()
+            });
+
             _hardwareInfoViewModel = new HardwareInfoViewModel(
                 _hardwareDetectionService,
-                _hardwareSensorService);
+                _hardwareSensorService,
+                _telemetryHub);
             _latestDiagnosisState = new LatestDiagnosisState();
             _diagnosisHistoryService = new LocalDiagnosisHistoryService(
                 applicationDataPaths);
@@ -84,7 +99,8 @@ namespace AIGeekTuner
                 _applicationSettingsService,
                 _connectionService,
                 ConfigurationStore,
-                _localDataDirectoryService);
+                _localDataDirectoryService,
+                _telemetryHub);
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(
                 aiService,
