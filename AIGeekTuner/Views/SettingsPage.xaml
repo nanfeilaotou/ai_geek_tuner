@@ -337,6 +337,28 @@
                                        Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
                         </StackPanel>
                     </Border>
+
+                    <Border Style="{StaticResource SettingsRowStyle}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="录制采样间隔" Style="{StaticResource InfoLabelStyle}"/>
+                                <ComboBox Grid.Column="1" HorizontalAlignment="Left" MinWidth="140"
+                                          x:Name="RecordingIntervalCombo"
+                                          Style="{StaticResource ModelComboStyle}" IsEditable="False"
+                                          SelectionChanged="RecordingInterval_SelectionChanged">
+                                    <ComboBoxItem Tag="1000" Content="1 秒"/>
+                                    <ComboBoxItem Tag="2000" Content="2 秒（推荐）"/>
+                                    <ComboBoxItem Tag="5000" Content="5 秒"/>
+                                </ComboBox>
+                            </Grid>
+                            <TextBlock Text="仅作用于新的录制会话；正在录制的会话保持开始时的间隔。"
+                                       Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

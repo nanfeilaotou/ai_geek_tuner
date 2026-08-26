@@ -5,6 +5,7 @@ namespace AIGeekTuner.Services.Navigation
         Dashboard,
         Hardware,
         Diagnosis,
+        Sessions,
         Result,
         History,
         Settings

@@ -77,6 +77,16 @@ AIGeekTuner 可读取可用的外部硬件监控数据，并保留数据来源�
 - 同一指标按固定优先级（HWiNFO → AIDA64 → LibreHardwareMonitor）选择单一来源，不做多源平均，并保留来源溯源。
 - Hardware 页与 Settings 页可查看各数据源状态。
 
+## Diagnostic Recording (V2-M2)
+
+手动录制硬件遥测会话：点击开始后按固定周期采集统一遥测快照，停止时生成本地确定性分析。
+
+- 可配置采样间隔：1 / 2（默认）/ 5 秒
+- 只记录 canonical 核心指标与多设备实例，保留来源溯源（含 HWiNFO→AIDA64→LibreHardwareMonitor 的来源切换）
+- 统计：Min / Avg / Max / P50 / P95 / P99 与覆盖率
+- 关键变化事件（温度 ≥5°C、利用率 ≥30pp、频率/功耗相对+绝对阈值、CPU throttling、来源切换、采样缺口）
+- 本地存储于 `Sessions/{id}/session.json`（原子写入）
+
 ## Tests
 
 运行：

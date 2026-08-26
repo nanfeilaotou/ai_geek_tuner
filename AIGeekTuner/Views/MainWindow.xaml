@@ -41,6 +41,12 @@
                     <Button Content="✦   AI 智能诊断" Command="{Binding ShowDiagnosisCommand}"
                             Style="{StaticResource NavigationSelectedableStyle}"
                             Tag="Diagnosis" Margin="0,2"/>
+                    <Button Content="◉   数据录制" Command="{Binding ShowSessionsCommand}"
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Sessions" Margin="0,2"/>
+                    <Button Content="◉   数据录制" Command="{Binding ShowSessionsCommand}"
+                            Style="{StaticResource NavigationSelectedableStyle}"
+                            Tag="Sessions" Margin="0,2"/>
                     <Button Content="▧   诊断报告" Command="{Binding ShowResultCommand}"
                             Style="{StaticResource NavigationSelectedableStyle}"
                             Tag="Result" Margin="0,2"/>

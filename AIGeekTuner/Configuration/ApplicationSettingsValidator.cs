@@ -15,6 +15,9 @@ namespace AIGeekTuner.Configuration
 
         public const int MaxFaultLogCharactersLimit = 200_000;
 
+        /// <summary>录制采样间隔只允许 1/2/5 秒（§3：不做更高频率）。</summary>
+        public static readonly IReadOnlyList<int> AllowedRecordingIntervalsMs = [1000, 2000, 5000];
+
         public static IReadOnlyList<string> Validate(ApplicationSettings settings)
         {
             ArgumentNullException.ThrowIfNull(settings);
@@ -41,6 +44,11 @@ namespace AIGeekTuner.Configuration
             {
                 errors.Add(
                     $"诊断输入长度必须在 {MinFaultLogCharacters:N0} 到 {MaxFaultLogCharactersLimit:N0} 字符之间。");
+            }
+
+            if (!AllowedRecordingIntervalsMs.Contains(settings.RecordingIntervalMs))
+            {
+                errors.Add("诊断录制采样间隔只允许 1000 / 2000 / 5000 毫秒。");
             }
 
             return errors;

@@ -18,5 +18,8 @@ namespace AIGeekTuner.Configuration
             DiagnosisInputOptions.DefaultMaxFaultLogCharacters;
 
         public bool UseJsonFormat { get; init; } = OllamaOptions.DefaultUseJsonFormat;
+
+        /// <summary>诊断录制采样间隔（毫秒）。合法值由 ApplicationSettingsValidator 定义。</summary>
+        public int RecordingIntervalMs { get; init; } = 2000;
     }
 }

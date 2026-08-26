@@ -73,6 +73,7 @@ namespace AIGeekTuner.ViewModels
             _maxLogLengthText = current.MaxFaultLogCharacters.ToString("N0");
             _useJsonFormat = current.UseJsonFormat;
             _autoSaveDiagnosisHistory = current.AutoSaveDiagnosisHistory;
+            RecordingIntervalMs = current.RecordingIntervalMs;
 
             _saveCommand = new AsyncRelayCommand(SaveAsync, () => !IsSaving);
             _refreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsLoadingModels);
@@ -184,6 +185,9 @@ namespace AIGeekTuner.ViewModels
             get => _autoSaveDiagnosisHistory;
             set => SetProperty(ref _autoSaveDiagnosisHistory, value);
         }
+
+        /// <summary>诊断录制采样间隔（毫秒）；合法值 1000/2000/5000。</summary>
+        public int RecordingIntervalMs { get; set; }
 
         public ObservableCollection<string> AvailableModels { get; } = [];
 
@@ -397,7 +401,8 @@ namespace AIGeekTuner.ViewModels
                 OllamaModelName = ModelName.Trim(),
                 OllamaTimeoutSeconds = int.Parse(TimeoutSecondsText),
                 MaxFaultLogCharacters = int.Parse(MaxLogLengthText, System.Globalization.NumberStyles.AllowThousands),
-                UseJsonFormat = UseJsonFormat
+                UseJsonFormat = UseJsonFormat,
+                RecordingIntervalMs = RecordingIntervalMs
             };
 
             var errors = ApplicationSettingsValidator.Validate(settings);

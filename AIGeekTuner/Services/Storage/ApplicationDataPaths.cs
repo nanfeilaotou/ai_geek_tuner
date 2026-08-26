@@ -25,6 +25,7 @@ namespace AIGeekTuner.Services.Storage
             SettingsDirectory = Path.Combine(RootDirectory, "Settings");
             SettingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
             LogsDirectory = Path.Combine(RootDirectory, "Logs");
+            SessionsDirectory = Path.Combine(RootDirectory, "Sessions");
 
             var effectiveLegacyRoot = legacyRootDirectory
                 ?? (overrideRoot is null
@@ -77,6 +78,8 @@ namespace AIGeekTuner.Services.Storage
 
         public string LogsDirectory { get; }
 
+        public string SessionsDirectory { get; }
+
         public string LegacyRootDirectory { get; }
 
         public string LegacyHistoryDirectory { get; }
@@ -90,6 +93,7 @@ namespace AIGeekTuner.Services.Storage
             Directory.CreateDirectory(ReportsDirectory);
             Directory.CreateDirectory(SettingsDirectory);
             Directory.CreateDirectory(LogsDirectory);
+            Directory.CreateDirectory(SessionsDirectory);
         }
 
         public static ApplicationDataPaths Default { get; } = new();

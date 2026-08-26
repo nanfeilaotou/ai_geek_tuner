@@ -20,6 +20,7 @@ using AIGeekTuner.Services.Telemetry;
 using AIGeekTuner.Services.Telemetry.Aida64;
 using AIGeekTuner.Services.Telemetry.HwInfo;
 using AIGeekTuner.Services.Telemetry.LibreHardwareMonitor;
+using AIGeekTuner.Services.Telemetry.Recording;
 using AIGeekTuner.ViewModels;
 using AIGeekTuner.Views;
 
@@ -36,6 +37,8 @@ namespace AIGeekTuner
         private readonly IHardwareDetectionService _hardwareDetectionService;
         private readonly IHardwareSensorService _hardwareSensorService;
         private readonly ITelemetryHub _telemetryHub;
+        private readonly ITelemetryRecordingService _recordingService;
+        private readonly SessionsViewModel _sessionsViewModel;
         private readonly IDiagnosisService _diagnosisService;
         private readonly IDiagnosisHistoryService _diagnosisHistoryService;
         private readonly ISystemContextCollector _systemContextCollector;
@@ -72,6 +75,10 @@ namespace AIGeekTuner
                 new LibreHardwareMonitorTelemetryProvider()
             });
 
+            // V2-M2：Recorder 单实例服务——生命周期独立于页面（§33）。
+            var sessionStore = new TelemetrySessionStore(applicationDataPaths);
+            _recordingService = new TelemetryRecordingService(_telemetryHub);
+
             _hardwareInfoViewModel = new HardwareInfoViewModel(
                 _hardwareDetectionService,
                 _hardwareSensorService,
@@ -101,6 +108,10 @@ namespace AIGeekTuner
                 ConfigurationStore,
                 _localDataDirectoryService,
                 _telemetryHub);
+            _sessionsViewModel = new SessionsViewModel(
+                _recordingService,
+                sessionStore,
+                _applicationSettingsService);
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(
                 aiService,
@@ -133,6 +144,17 @@ namespace AIGeekTuner
 
         protected override void OnClosed(EventArgs e)
         {
+            // 录制中的会话 best-effort 收尾（§34）：不阻塞退出超过 5 秒。
+            try
+            {
+                _recordingService.FinalizeIfRecordingAsync(TimeSpan.FromSeconds(5))
+                    .GetAwaiter().GetResult();
+            }
+            catch (Exception exception)
+            {
+                Services.Diagnostics.ExceptionLogWriter.Write(exception, "Recorder shutdown finalize");
+            }
+
             _httpClient.Dispose();
             base.OnClosed(e);
         }
@@ -179,6 +201,10 @@ namespace AIGeekTuner
                         _confirmationDialogService,
                         _reportExportService,
                         _latestDiagnosisState)
+                },
+                AppPage.Sessions => new SessionsPage
+                {
+                    DataContext = _sessionsViewModel
                 },
                 AppPage.Settings => new SettingsPage
                 {

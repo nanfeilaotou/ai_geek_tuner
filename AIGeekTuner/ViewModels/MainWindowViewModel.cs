@@ -17,6 +17,7 @@ namespace AIGeekTuner.ViewModels
             ShowDashboardCommand = NavigateTo(AppPage.Dashboard);
             ShowHardwareCommand = NavigateTo(AppPage.Hardware);
             ShowDiagnosisCommand = NavigateTo(AppPage.Diagnosis);
+            ShowSessionsCommand = NavigateTo(AppPage.Sessions);
             ShowResultCommand = NavigateTo(AppPage.Result);
             ShowHistoryCommand = NavigateTo(AppPage.History);
             ShowSettingsCommand = NavigateTo(AppPage.Settings);
@@ -27,6 +28,7 @@ namespace AIGeekTuner.ViewModels
         public ICommand ShowDashboardCommand { get; }
         public ICommand ShowHardwareCommand { get; }
         public ICommand ShowDiagnosisCommand { get; }
+        public ICommand ShowSessionsCommand { get; }
         public ICommand ShowResultCommand { get; }
         public ICommand ShowHistoryCommand { get; }
         public ICommand ShowSettingsCommand { get; }
