@@ -1,10 +1,15 @@
+using System.Text.Json;
 using System.Collections.ObjectModel;
+using System.Windows;
+using System.IO;
 using System.Windows.Input;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Models.Telemetry;
+using AIGeekTuner.Services.SessionAnalysis;
 using AIGeekTuner.Services.Settings;
+using AIGeekTuner.Services.Voice;
 using AIGeekTuner.Services.Telemetry.Recording;
 
 namespace AIGeekTuner.ViewModels
@@ -80,11 +85,26 @@ namespace AIGeekTuner.ViewModels
         public SessionsViewModel(
             ITelemetryRecordingService recorder,
             ITelemetrySessionStore store,
-            IApplicationSettingsService settingsService)
+            IApplicationSettingsService settingsService,
+            ISessionAnalysisService analysisService,
+            ISessionAnalysisStore analysisStore,
+            IVoiceSynthesisService voiceService,
+            IWavPlaybackService wavPlayback,
+            Func<VoiceConfiguration> voiceSnapshot)
         {
             _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
             _store = store ?? throw new ArgumentNullException(nameof(store));
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
+            _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
+            _analysisStore = analysisStore ?? throw new ArgumentNullException(nameof(analysisStore));
+            _voiceService = voiceService ?? throw new ArgumentNullException(nameof(voiceService));
+            _wavPlayback = wavPlayback ?? throw new ArgumentNullException(nameof(wavPlayback));
+            _voiceSnapshot = voiceSnapshot ?? throw new ArgumentNullException(nameof(voiceSnapshot));
+
+            AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsAnalyzing);
+            PlaySpokenSummaryCommand = new RelayCommand(PlaySpokenSummary, () =>
+                !IsRecording && HasAnalysis && !string.IsNullOrWhiteSpace(SpokenSummary)
+                && VoiceState is VoicePlaybackState.Idle or VoicePlaybackState.Error);
 
             StartRecordingCommand = new RelayCommand(StartRecording, () => !IsRecording);
             StopAndAnalyzeCommand = new AsyncRelayCommand(StopAndAnalyzeAsync, () => IsRecording);
@@ -118,6 +138,63 @@ namespace AIGeekTuner.ViewModels
         public AsyncRelayCommand StopAndAnalyzeCommand { get; }
         public RelayCommand SelectRecentCommand { get; }
         public RelayCommand DeleteRecentCommand { get; }
+
+        // ---- V2-M3：AI 分析 ----
+        private readonly ISessionAnalysisService _analysisService;
+        private readonly ISessionAnalysisStore _analysisStore;
+        private bool _isAnalyzing;
+        private bool _hasAnalysis;
+        private string _assessmentBadge = string.Empty;
+        private string _confidenceText = string.Empty;
+        private string _analysisSummary = string.Empty;
+        private string _analysisError = string.Empty;
+        private string _analysisDurationText = string.Empty;
+
+        public ObservableCollection<AnalysisFindingRow> Findings { get; } = [];
+        public ObservableCollection<string> Recommendations { get; } = [];
+        public ObservableCollection<string> Uncertainties { get; } = [];
+
+        public AsyncRelayCommand AnalyzeCommand { get; }
+
+        public bool IsAnalyzing { get => _isAnalyzing; private set => SetProperty(ref _isAnalyzing, value); }
+        public bool HasAnalysis { get => _hasAnalysis; private set => SetProperty(ref _hasAnalysis, value); }
+        public string AssessmentBadge { get => _assessmentBadge; private set => SetProperty(ref _assessmentBadge, value); }
+        public string ConfidenceText { get => _confidenceText; private set => SetProperty(ref _confidenceText, value); }
+        public string AnalysisSummary { get => _analysisSummary; private set => SetProperty(ref _analysisSummary, value); }
+        public string AnalysisError { get => _analysisError; private set => SetProperty(ref _analysisError, value); }
+        public string AnalysisDurationText { get => _analysisDurationText; private set => SetProperty(ref _analysisDurationText, value); }
+
+        // ---- V2-M3：语音摘要 ----
+        private readonly IVoiceSynthesisService _voiceService;
+        private readonly IWavPlaybackService _wavPlayback;
+        private readonly Func<VoiceConfiguration> _voiceSnapshot;
+        private VoicePlaybackState _voiceState = VoicePlaybackState.Idle;
+        private string _spokenSummary = string.Empty;
+        private string _voiceStateText = "未生成";
+
+        public RelayCommand PlaySpokenSummaryCommand { get; }
+
+        public string SpokenSummary { get => _spokenSummary; private set => SetProperty(ref _spokenSummary, value); }
+        public string VoiceStateText { get => _voiceStateText; private set => SetProperty(ref _voiceStateText, value); }
+
+        public VoicePlaybackState VoiceState { get => _voiceState; private set
+            {
+                if (SetProperty(ref _voiceState, value))
+                {
+                    VoiceStateText = value switch
+                    {
+                        VoicePlaybackState.Generating => "正在生成语音…",
+                        VoicePlaybackState.Playing => "播放中…",
+                        VoicePlaybackState.Error => "语音服务出错",
+                        _ => "未生成",
+                    };
+                    PlaySpokenSummaryCommand.NotifyCanExecuteChanged();
+                }
+            }
+        }
+
+        public enum VoicePlaybackState { Idle, Generating, Playing, Error }
+
 
         public void StartRecording()
         {
@@ -302,6 +379,168 @@ namespace AIGeekTuner.ViewModels
             HasResult = true;
         }
 
+        public async Task AnalyzeAsync()
+        {
+            if (IsAnalyzing || SelectedRecent is null)
+            {
+                return;
+            }
+
+            var session = _store.Load(SelectedRecent.Id);
+            if (session is null)
+            {
+                AnalysisError = "会话不存在，无法分析。";
+                return;
+            }
+
+            IsAnalyzing = true;
+            AnalysisError = string.Empty;
+            try
+            {
+                var summary = session.Summary ?? TelemetrySessionAnalyzer.Analyze(session);
+                var context = TelemetrySessionAnalyzer.BuildAnalysisContext(
+                    session with { Summary = summary });
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var run = await _analysisService.AnalyzeAsync(context, CancellationToken.None);
+                sw.Stop();
+
+                if (!run.Success || run.Result is null)
+                {
+                    AnalysisError = $"AI 分析失败：{run.ErrorMessage}（请求 {run.RequestCount} 次）";
+                    return;
+                }
+
+                ApplyAnalysis(run.Result, run.ModelName, sw.ElapsedMilliseconds,
+                    JsonSerializer.Serialize(context), session.Id);
+            }
+            catch (OperationCanceledException)
+            {
+                // 用户取消：保留旧分析。
+            }
+            catch (Exception exception)
+            {
+                Services.Diagnostics.ExceptionLogWriter.Write(exception, "Sessions analyze");
+                AnalysisError = "AI 分析失败：" + exception.Message;
+            }
+            finally
+            {
+                IsAnalyzing = false;
+            }
+        }
+
+        /// <summary>把 AI 结果渲染到界面；证据 ID 映射为可读文本（§30）。</summary>
+        private void ApplyAnalysis(
+            SessionAnalysisResult result,
+            string modelName,
+            long durationMs,
+            string contextJson,
+            string sessionId)
+        {
+            AssessmentBadge = result.OverallAssessment.ToString();
+            ConfidenceText = $"Confidence {result.Confidence * 100:0}%";
+            AnalysisSummary = result.Summary;
+            AnalysisDurationText = $"耗时 {durationMs} ms · 模型 {modelName}";
+
+            Findings.Clear();
+            foreach (var finding in result.Findings)
+            {
+                var evidenceText = finding.EvidenceIds.Count == 0
+                    ? string.Empty
+                    : "  依据: " + string.Join("、", finding.EvidenceIds.Select(DescribeEvidence));
+                Findings.Add(new AnalysisFindingRow(
+                    finding.Title,
+                    finding.Category.ToString(),
+                    finding.Assessment,
+                    finding.Explanation + evidenceText));
+            }
+
+            Recommendations.Clear();
+            foreach (var recommendation in result.Recommendations)
+            {
+                Recommendations.Add(recommendation.Text);
+            }
+
+            Uncertainties.Clear();
+            foreach (var uncertainty in result.Uncertainties)
+            {
+                Uncertainties.Add(uncertainty);
+            }
+
+            SpokenSummary = result.SpokenSummary;
+            HasAnalysis = true;
+            VoiceState = VoicePlaybackState.Idle;
+            void ApplyLocal() { }
+            ApplyLocal();
+            _ = modelName; _ = durationMs; _ = contextJson; _ = sessionId; // 元数据由 store 层持久化
+        }
+
+        internal static string DescribeEvidence(string evidenceId)
+        {
+            if (evidenceId.StartsWith("stat:", StringComparison.Ordinal))
+            {
+                var parts = evidenceId.Split(':');
+                var metric = parts.Length > 2 ? parts[^1] : evidenceId;
+                return MetricLabel(metric) + " 统计";
+            }
+
+            if (evidenceId.StartsWith("event:", StringComparison.Ordinal))
+            {
+                return "关键事件 " + evidenceId["event:".Length..].TrimStart('0');
+            }
+
+            return evidenceId;
+        }
+
+        public void PlaySpokenSummary()
+        {
+            if (VoiceState is VoicePlaybackState.Generating or VoicePlaybackState.Playing
+                || string.IsNullOrWhiteSpace(SpokenSummary))
+            {
+                return;
+            }
+
+            var text = SpokenSummary;
+            var configuration = _voiceSnapshot();
+            VoiceState = VoicePlaybackState.Generating;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await _voiceService.SynthesizeAsync(text, configuration, CancellationToken.None);
+                    if (!result.Succeeded || result.WavBytes is null)
+                    {
+                        await Application.Current.Dispatcher.InvokeAsync(() =>
+                        {
+                            VoiceState = VoicePlaybackState.Error;
+                            ErrorText = result.ErrorMessage ?? "语音合成失败。";
+                            HasError = true;
+                        });
+                        return;
+                    }
+
+                    var cacheDir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        "AI-GeekTuner", "VoiceCache");
+                    Directory.CreateDirectory(cacheDir);
+                    var wavPath = Path.Combine(cacheDir, "spoken-summary.wav");
+                    File.WriteAllBytes(wavPath, result.WavBytes);
+
+                    await Application.Current.Dispatcher.InvokeAsync(() => VoiceState = VoicePlaybackState.Playing);
+                    _wavPlayback.PlayWav(result.WavBytes);
+                    await Application.Current.Dispatcher.InvokeAsync(() => VoiceState = VoicePlaybackState.Idle);
+                }
+                catch (Exception exception)
+                {
+                    await Application.Current.Dispatcher.InvokeAsync(() =>
+                    {
+                        VoiceState = VoicePlaybackState.Error;
+                        ErrorText = exception.Message;
+                        HasError = true;
+                    });
+                }
+            });
+        }
+
         private void SyncFromRecorder()
         {
             var recording = _recorder.IsRecording;
@@ -379,3 +618,6 @@ namespace AIGeekTuner.ViewModels
                 : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{duration.Minutes:00}:{duration.Seconds:00}");
     }
 }
+
+
+

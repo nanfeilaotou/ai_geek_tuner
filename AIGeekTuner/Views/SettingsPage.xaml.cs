@@ -12,11 +12,6 @@ namespace AIGeekTuner.Views
         {
             InitializeComponent();
             Loaded += (_, _) => SyncIntervalFromVm();
-            if (DataContext is SettingsViewModel)
-            {
-                SyncIntervalFromVm();
-            }
-
             DataContextChanged += (_, _) => SyncIntervalFromVm();
         }
 

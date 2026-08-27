@@ -359,6 +359,38 @@
                                        Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
                         </StackPanel>
                     </Border>
+
+                    <Border Style="{StaticResource SettingsRowStyle}">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="启用 GPT-SoVITS" Style="{StaticResource InfoLabelStyle}"/>
+                                <ToggleButton Grid.Column="1"
+                                              IsChecked="{Binding VoiceEnabled}"
+                                              Style="{StaticResource SettingsToggleStyle}"
+                                              HorizontalAlignment="Left"/>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource SettingsRowStyle}">
+                        <StackPanel>
+                            <TextBlock Text="服务地址" Style="{StaticResource InfoLabelStyle}" Margin="0,0,0,4"/>
+                            <TextBox Text="{Binding VoiceEndpoint, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsInputStyle}"/>
+                            <TextBlock Text="参考音频路径（必须为 GPT-SoVITS 服务进程可访问的路径）"
+                                       Style="{StaticResource InfoLabelStyle}" Margin="0,8,0,4"/>
+                            <TextBox Text="{Binding VoiceReferenceAudioPath, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsInputStyle}"/>
+                            <TextBlock Text="参考音频转写文本（prompt_text）"
+                                       Style="{StaticResource InfoLabelStyle}" Margin="0,8,0,4"/>
+                            <TextBox Text="{Binding VoicePromptText, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource SettingsInputStyle}"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 

@@ -92,6 +92,84 @@
                         Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
+                        <Grid Margin="0,0,0,6">
+                            <TextBlock Text="AI 分析" Style="{StaticResource SectionTitleStyle}"/>
+                            <Button Content="使用本地模型分析本次录制"
+                                    Command="{Binding AnalyzeCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}"
+                                    Padding="12,6" HorizontalAlignment="Right"/>
+                        </Grid>
+                        <TextBlock Text="{Binding IsAnalyzing}" Visibility="Collapsed"/>
+                        <TextBlock Text="正在分析录制结果…" Foreground="#FFE08A" FontSize="11"
+                                   Visibility="{Binding IsAnalyzing, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="{Binding AnalysisError}" Foreground="#FFD1D1" FontSize="11" TextWrapping="Wrap"
+                                   Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
+
+                        <StackPanel Visibility="{Binding HasAnalysis, Converter={StaticResource BoolToVis}}">
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,4">
+                                <Border Background="#33FFE08A" Padding="8,2" CornerRadius="3">
+                                    <TextBlock Text="{Binding AssessmentBadge}" Foreground="#FFE08A" FontSize="11" FontWeight="Bold"/>
+                                </Border>
+                                <TextBlock Text="{Binding ConfidenceText}" Foreground="#A9D9E9" FontSize="11" Margin="10,0,0,0"/>
+                                <TextBlock Text="{Binding AnalysisDurationText}" Foreground="#7FB6CB" FontSize="10" Margin="12,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock Text="{Binding AnalysisSummary}" Foreground="#ECFAFF" FontSize="12"
+                                       TextWrapping="Wrap" Margin="0,4,0,8"/>
+
+                            <TextBlock Text="主要发现" Foreground="#9FD9EA" FontSize="11" FontWeight="SemiBold" Margin="0,4,0,3"/>
+                            <ItemsControl ItemsSource="{Binding Findings}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,3">
+                                            <TextBlock Foreground="#ECFAFF" FontSize="11">
+                                                <Run Text="• "/><Run Text="{Binding Title, Mode=OneWay}"/><Run Text="{Binding Category, Mode=OneWay, StringFormat= · {0}}"/>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Explanation}" Foreground="#B4DEEB" FontSize="10"
+                                                       TextWrapping="Wrap" Margin="14,1,0,0"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="建议" Foreground="#9FD9EA" FontSize="11" FontWeight="SemiBold" Margin="0,8,0,3"/>
+                            <ItemsControl ItemsSource="{Binding Recommendations}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Foreground="#B4DEEB" FontSize="11" Margin="8,1,0,0" TextWrapping="Wrap">
+                                            <Run Text="• "/><Run Text="{Binding Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="数据限制" Foreground="#9FD9EA" FontSize="11" FontWeight="SemiBold" Margin="0,8,0,3"/>
+                            <ItemsControl ItemsSource="{Binding Uncertainties}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Foreground="#B4DEEB" FontSize="11" Margin="8,1,0,0" TextWrapping="Wrap">
+                                            <Run Text="• "/><Run Text="{Binding Mode=OneWay}"/>
+                                        </TextBlock>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="语音摘要" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,6"/>
+                        <TextBlock Text="{Binding SpokenSummary}" Foreground="#ECFAFF" FontSize="12"
+                                   TextWrapping="Wrap" Margin="0,0,0,8"/>
+                        <Button Content="▶ 播放摘要" Command="{Binding PlaySpokenSummaryCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}" Padding="14,6"
+                                HorizontalAlignment="Left"/>
+                        <TextBlock Text="{Binding VoiceStateText}" Foreground="#A9D9E9" FontSize="10" Margin="0,6,0,0"/>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
                         <TextBlock Text="Session Summary · 统计" Style="{StaticResource SectionTitleStyle}"/>
                         <TextBlock Text="确定性统计分析；变化检测 ≠ 硬件故障判定。Coverage = 出现该指标的采样占比。"
                                    Foreground="#A9D9E9" FontSize="11" Margin="0,4,0,8"/>

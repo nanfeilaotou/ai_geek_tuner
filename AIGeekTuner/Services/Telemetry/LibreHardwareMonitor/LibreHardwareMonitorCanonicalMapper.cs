@@ -150,18 +150,43 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
                 .Where(reading => reading.Device.Kind == TelemetryDeviceKind.Storage)
                 .GroupBy(reading => reading.Device.DeviceKey))
             {
-                var temperature = group
-                    .Where(reading =>
-                        reading.Unit == TelemetryUnit.Celsius
-                        && reading.Value > 0
-                        && reading.Value <= MaxPlausibleTemperatureCelsius)
-                    .OrderByDescending(reading => reading.Value)
-                    .FirstOrDefault();
+                // §9/§10：storage.temperature 代表用户通常理解的“盘体/Composite 主温度”，
+                // 按 native label 优先级选择（Temperature > Composite > Drive Temperature），
+                // 绝不按数值大小猜测；其余传感器保留在 Raw 层。
+                var temperature = SelectPrimaryStorageTemperature(group);
                 AddIfFound(result, temperature, TelemetryMetricKey.StorageTemperature);
             }
         }
 
-        private static RawTelemetryReading[] FilterByDeviceKind(
+        private static RawTelemetryReading? SelectPrimaryStorageTemperature(
+            IEnumerable<RawTelemetryReading> group)
+        {
+            var candidates = group
+                .Where(reading =>
+                    reading.Unit == TelemetryUnit.Celsius
+                    && reading.Value > 0
+                    && reading.Value <= MaxPlausibleTemperatureCelsius)
+                .ToArray();
+            if (candidates.Length == 0)
+            {
+                return null;
+            }
+
+            return candidates
+                .OrderBy(reading => LabelRank(reading.Label))
+                .ThenByDescending(reading => reading.Value)
+                .First();
+
+            static int LabelRank(string label)
+            {
+                var l = label.Trim();
+                if (l.Equals("Temperature", StringComparison.OrdinalIgnoreCase)) return 0;
+                if (l.Contains("Composite", StringComparison.OrdinalIgnoreCase)) return 1;
+                if (l.Contains("Drive Temperature", StringComparison.OrdinalIgnoreCase)) return 2;
+                if (l.StartsWith("Temperature", StringComparison.OrdinalIgnoreCase)) return 3;
+                return 9;
+            }
+        }        private static RawTelemetryReading[] FilterByDeviceKind(
             IReadOnlyList<RawTelemetryReading> rawReadings,
             TelemetryDeviceKind kind)
         {
@@ -224,3 +249,4 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
         }
     }
 }
+

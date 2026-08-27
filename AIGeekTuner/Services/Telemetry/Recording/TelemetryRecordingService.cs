@@ -18,6 +18,9 @@ namespace AIGeekTuner.Services.Telemetry.Recording
         /// <summary>最近一次 finalize 的保存路径（store 未配置或失败时为 null）。</summary>
         string? LastSavedPath { get; }
 
+        /// <summary>每个新采样追加后触发（后台线程）——供实时视图共享采样（§22）。</summary>
+        event Action<TelemetrySample>? SampleCaptured;
+
         /// <summary>开始录制；已有活动会话或间隔非法时返回 false（§35）。</summary>
         bool Start(int intervalMs);
 
@@ -70,6 +73,7 @@ namespace AIGeekTuner.Services.Telemetry.Recording
 
         /// <summary>最近一次 finalize 的保存路径；保存失败或未配置 store 时为 null。</summary>
         public string? LastSavedPath { get; private set; }
+        public event Action<TelemetrySample>? SampleCaptured;
 
         public bool IsRecording
         {
@@ -140,6 +144,7 @@ namespace AIGeekTuner.Services.Telemetry.Recording
                         {
                             var sample = await CaptureOnceAsync(_session!, ct);
                             _session!.AddSample(sample);
+                            SampleCaptured?.Invoke(sample);
                             if (_session!.Samples.Count >= _maxSamples)
                             {
                                 // 上限保护：自动正常收尾（§14），包括分析与落盘。
@@ -375,3 +380,4 @@ namespace AIGeekTuner.Services.Telemetry.Recording
         }
     }
 }
+

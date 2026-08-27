@@ -46,12 +46,43 @@ namespace AIGeekTuner.Configuration
                     $"诊断输入长度必须在 {MinFaultLogCharacters:N0} 到 {MaxFaultLogCharactersLimit:N0} 字符之间。");
             }
 
-            if (!AllowedRecordingIntervalsMs.Contains(settings.RecordingIntervalMs))
+            if (!AllowedRecordingIntervalsMs.Contains(settings.HardwareRefreshIntervalMs))
+            {
+                errors.Add("硬件页刷新间隔只允许 1000 / 2000 / 5000 毫秒。");
+            }            if (!AllowedRecordingIntervalsMs.Contains(settings.RecordingIntervalMs))
             {
                 errors.Add("诊断录制采样间隔只允许 1000 / 2000 / 5000 毫秒。");
             }
 
+            if (settings.Voice.Enabled)
+            {
+                if (!Uri.TryCreate(settings.Voice.Endpoint, UriKind.Absolute, out var voiceUri)
+                    || (voiceUri.Scheme != Uri.UriSchemeHttp && voiceUri.Scheme != Uri.UriSchemeHttps))
+                {
+                    errors.Add("语音服务地址必须是有效的 http:// 或 https:// 地址。");
+                }
+
+                if (settings.Voice.SpeedFactor is < 0.7 or > 1.3)
+                {
+                    errors.Add("语音速度必须在 0.7 到 1.3 之间。");
+                }
+
+                if (!AllowedPromptLanguages.Contains(settings.Voice.PromptLang,
+                        StringComparer.OrdinalIgnoreCase))
+                {
+                    errors.Add("参考音频语言仅支持 zh / ja / en。");
+                }
+
+                if (string.IsNullOrWhiteSpace(settings.Voice.ReferenceAudioPath))
+                {
+                    errors.Add("启用语音时必须填写参考音频路径。");
+                }
+            }
+
             return errors;
         }
+
+        public static readonly IReadOnlyList<string> AllowedPromptLanguages = ["zh", "ja", "en"];
     }
 }
+

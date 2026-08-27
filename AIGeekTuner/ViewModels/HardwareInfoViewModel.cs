@@ -4,6 +4,7 @@ using AIGeekTuner.Models;
 using AIGeekTuner.Models.Telemetry;
 using AIGeekTuner.Services.Hardware;
 using AIGeekTuner.Services.Telemetry;
+using AIGeekTuner.Services.Telemetry.Recording;
 
 namespace AIGeekTuner.ViewModels
 {
@@ -12,6 +13,8 @@ namespace AIGeekTuner.ViewModels
         private readonly IHardwareDetectionService _hardwareDetectionService;
         private readonly IHardwareSensorService _hardwareSensorService;
         private readonly ITelemetryHub? _telemetryHub;
+        private readonly ILiveTelemetrySource? _liveSource;
+        private readonly TelemetryTrendBuffer _trendBuffer = new(TimeSpan.FromMinutes(2));
         private readonly AsyncRelayCommand _refreshSensorsCommand;
 
         private string _deviceModel = "正在读取...";
@@ -50,13 +53,23 @@ namespace AIGeekTuner.ViewModels
         public HardwareInfoViewModel(
             IHardwareDetectionService hardwareDetectionService,
             IHardwareSensorService hardwareSensorService,
-            ITelemetryHub? telemetryHub = null)
+            ITelemetryHub? telemetryHub = null,
+            ILiveTelemetrySource? liveTelemetrySource = null)
         {
             _hardwareDetectionService = hardwareDetectionService
                 ?? throw new ArgumentNullException(nameof(hardwareDetectionService));
             _hardwareSensorService = hardwareSensorService
                 ?? throw new ArgumentNullException(nameof(hardwareSensorService));
             _telemetryHub = telemetryHub;
+            if (liveTelemetrySource is not null)
+            {
+                _liveSource = liveTelemetrySource;
+                _liveSource.SnapshotUpdated += s =>
+                {
+                    _trendBuffer.AddSnapshot(s);
+                    ApplyTelemetrySnapshot(s);
+                };
+            }
             _refreshSensorsCommand = new AsyncRelayCommand(
                 RefreshSensorsAsync,
                 () => !IsSensorRefreshing);

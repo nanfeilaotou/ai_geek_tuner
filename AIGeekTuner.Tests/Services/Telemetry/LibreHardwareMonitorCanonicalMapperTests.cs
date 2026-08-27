@@ -108,7 +108,7 @@ namespace AIGeekTuner.Tests.Services.Telemetry
         }
 
         [Fact]
-        public void StorageTemperatures_PerDeviceMax()
+        public void StorageTemperatures_LabelPriorityNotValueMax()
         {
             var ssdA = TelemetryDeviceIdentity.Storage("SSD A", "SSD A");
             var ssdB = TelemetryDeviceIdentity.Storage("SSD B", "SSD B");
@@ -125,7 +125,8 @@ namespace AIGeekTuner.Tests.Services.Telemetry
                 .Where(reading => reading.MetricKey == TelemetryMetricKey.StorageTemperature)
                 .ToDictionary(reading => reading.Device.DeviceKey, reading => reading.Value);
             Assert.Equal(2, byKey.Count);
-            Assert.Equal(44, byKey["storage:SSD A"]);
+            // §9：按标签优先级选主温度，不取最大值。
+            Assert.Equal(41, byKey["storage:SSD A"]);  // Temperature > Composite
             Assert.Equal(38, byKey["storage:SSD B"]);
         }
 
@@ -183,3 +184,4 @@ namespace AIGeekTuner.Tests.Services.Telemetry
         }
     }
 }
+

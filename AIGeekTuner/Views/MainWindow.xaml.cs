@@ -21,6 +21,8 @@ using AIGeekTuner.Services.Telemetry.Aida64;
 using AIGeekTuner.Services.Telemetry.HwInfo;
 using AIGeekTuner.Services.Telemetry.LibreHardwareMonitor;
 using AIGeekTuner.Services.Telemetry.Recording;
+using AIGeekTuner.Services.SessionAnalysis;
+using AIGeekTuner.Services.Voice;
 using AIGeekTuner.ViewModels;
 using AIGeekTuner.Views;
 
@@ -39,6 +41,7 @@ namespace AIGeekTuner
         private readonly ITelemetryHub _telemetryHub;
         private readonly ITelemetryRecordingService _recordingService;
         private readonly SessionsViewModel _sessionsViewModel;
+        private readonly LiveTelemetryCoordinator _liveTelemetryCoordinator;
         private readonly IDiagnosisService _diagnosisService;
         private readonly IDiagnosisHistoryService _diagnosisHistoryService;
         private readonly ISystemContextCollector _systemContextCollector;
@@ -78,6 +81,30 @@ namespace AIGeekTuner
             // V2-M2：Recorder 单实例服务——生命周期独立于页面（§33）。
             var sessionStore = new TelemetrySessionStore(applicationDataPaths);
             _recordingService = new TelemetryRecordingService(_telemetryHub);
+            var liveTelemetry = new LiveTelemetryCoordinator(_telemetryHub, _recordingService);
+
+            // V2-M3：Session AI（复用现有 HttpClient 与配置快照原则）+ GPT-SoVITS。
+            var analysisChatClient = new OllamaChatClient(
+                _httpClient,
+                () => ConfigurationStore.Snapshot().Ollama);
+            var analysisService = new OllamaSessionAnalysisService(analysisChatClient, new SessionAnalysisPromptBuilder());
+            var analysisStore = new SessionAnalysisStore(applicationDataPaths.SessionsDirectory);
+            var voiceHttpClient = new HttpClient();
+            var voiceService = new GptSoVitsVoiceSynthesisService(voiceHttpClient);
+            var wavPlayback = new SoundPlayerWavPlaybackService();
+            Func<VoiceConfiguration> voiceSnapshot = () =>
+            {
+                var voice = _applicationSettingsService.Current.Voice;
+                return new VoiceConfiguration(
+                    voice.Endpoint,
+                    voice.ReferenceAudioPath,
+                    voice.PromptText,
+                    voice.PromptLang,
+                    "zh",
+                    voice.SpeedFactor,
+                    string.IsNullOrWhiteSpace(voice.GptModelPath) ? null : voice.GptModelPath,
+                    string.IsNullOrWhiteSpace(voice.SovitsModelPath) ? null : voice.SovitsModelPath);
+            };
 
             _hardwareInfoViewModel = new HardwareInfoViewModel(
                 _hardwareDetectionService,
@@ -108,10 +135,16 @@ namespace AIGeekTuner
                 ConfigurationStore,
                 _localDataDirectoryService,
                 _telemetryHub);
+            _liveTelemetryCoordinator = liveTelemetry;
             _sessionsViewModel = new SessionsViewModel(
                 _recordingService,
                 sessionStore,
-                _applicationSettingsService);
+                _applicationSettingsService,
+                analysisService,
+                analysisStore,
+                voiceService,
+                wavPlayback,
+                voiceSnapshot);
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(
                 aiService,
@@ -215,3 +248,5 @@ namespace AIGeekTuner
         }
     }
 }
+
+

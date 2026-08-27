@@ -74,6 +74,10 @@ namespace AIGeekTuner.ViewModels
             _useJsonFormat = current.UseJsonFormat;
             _autoSaveDiagnosisHistory = current.AutoSaveDiagnosisHistory;
             RecordingIntervalMs = current.RecordingIntervalMs;
+            VoiceEnabled = current.Voice.Enabled;
+            VoiceEndpoint = current.Voice.Endpoint;
+            VoiceReferenceAudioPath = current.Voice.ReferenceAudioPath;
+            VoicePromptText = current.Voice.PromptText;
 
             _saveCommand = new AsyncRelayCommand(SaveAsync, () => !IsSaving);
             _refreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsLoadingModels);
@@ -188,6 +192,11 @@ namespace AIGeekTuner.ViewModels
 
         /// <summary>诊断录制采样间隔（毫秒）；合法值 1000/2000/5000。</summary>
         public int RecordingIntervalMs { get; set; }
+
+        public bool VoiceEnabled { get; set; }
+        public string VoiceEndpoint { get; set; } = string.Empty;
+        public string VoiceReferenceAudioPath { get; set; } = string.Empty;
+        public string VoicePromptText { get; set; } = string.Empty;
 
         public ObservableCollection<string> AvailableModels { get; } = [];
 
@@ -402,7 +411,18 @@ namespace AIGeekTuner.ViewModels
                 OllamaTimeoutSeconds = int.Parse(TimeoutSecondsText),
                 MaxFaultLogCharacters = int.Parse(MaxLogLengthText, System.Globalization.NumberStyles.AllowThousands),
                 UseJsonFormat = UseJsonFormat,
-                RecordingIntervalMs = RecordingIntervalMs
+                RecordingIntervalMs = RecordingIntervalMs,
+                Voice = new VoiceSettings
+                {
+                    Enabled = VoiceEnabled,
+                    Endpoint = VoiceEndpoint.Trim(),
+                    ReferenceAudioPath = VoiceReferenceAudioPath.Trim(),
+                    PromptText = VoicePromptText,
+                    PromptLang = previous.Voice.PromptLang,
+                    SpeedFactor = previous.Voice.SpeedFactor,
+                    GptModelPath = previous.Voice.GptModelPath,
+                    SovitsModelPath = previous.Voice.SovitsModelPath,
+                }
             };
 
             var errors = ApplicationSettingsValidator.Validate(settings);

@@ -345,6 +345,7 @@ namespace AIGeekTuner.Services.Telemetry.Recording
         public sealed record AnalysisSource(string Source, string Status, int RawReadings);
 
         public sealed record AnalysisStatistic(
+            string EvidenceId,
             string DeviceKey,
             string MetricKey,
             string Unit,
@@ -356,6 +357,7 @@ namespace AIGeekTuner.Services.Telemetry.Recording
             double P95);
 
         public sealed record AnalysisEvent(
+            string EvidenceId,
             string Type,
             DateTimeOffset TimestampUtc,
             string Source,
@@ -386,6 +388,7 @@ namespace AIGeekTuner.Services.Telemetry.Recording
                     source.Status.ToString(),
                     source.RawReadingCount)).ToArray(),
                 summary.Statistics.Select(statistic => new AnalysisStatistic(
+                    $"stat:{statistic.DeviceKey}:{statistic.MetricKey}",
                     statistic.DeviceKey,
                     statistic.MetricKey,
                     statistic.Unit,
@@ -395,7 +398,8 @@ namespace AIGeekTuner.Services.Telemetry.Recording
                     Math.Round(statistic.Average, 2),
                     Math.Round(statistic.Maximum, 2),
                     Math.Round(statistic.P95, 2))).ToArray(),
-                summary.TopEvents.Select(@event => new AnalysisEvent(
+                summary.TopEvents.Select((@event, index) => new AnalysisEvent(
+                    $"event:{index + 1:D4}",
                     @event.Type.ToString(),
                     @event.TimestampUtc,
                     @event.Source ?? string.Empty,
