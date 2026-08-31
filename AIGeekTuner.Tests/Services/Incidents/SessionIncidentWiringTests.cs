@@ -45,7 +45,7 @@ namespace AIGeekTuner.Tests.Services.Incidents
         private sealed class FakeAnalysisService : ISessionAnalysisService
         {
             public Task<SessionAnalysisRun> AnalyzeAsync(
-                TelemetrySessionAnalyzer.TelemetryAnalysisContext context,
+                DiagnosticEvidenceContext context,
                 CancellationToken cancellationToken) =>
                 Task.FromResult(new SessionAnalysisRun(
                     Success: false, Result: null, ErrorMessage: "not used in this test",
@@ -77,7 +77,8 @@ namespace AIGeekTuner.Tests.Services.Incidents
                 new FakeVoiceService(),
                 new FakeWavPlayback(),
                 () => new VoiceConfiguration("http://localhost:9880", "", "", "", "zh", 1.0, null, null),
-                correlation);
+                correlation,
+                new SessionIncidentStore(_temp.FullPath));
         }
 
         [Fact]

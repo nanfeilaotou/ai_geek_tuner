@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Services.Telemetry.Recording;
 
@@ -7,7 +8,8 @@ namespace AIGeekTuner.Services.SessionAnalysis
 {
     /// <summary>
     /// 生产实现：structured output（完整 JSON Schema）优先；解析失败允许一次 repair（§23）；
-    /// HTTP/timeout/cancel 不做 repair。Context 超长时结构化裁剪事件数量（§20）。
+    /// HTTP/timeout/cancel 不做 repair。Context 超长时结构化裁剪（§20 + V2-M4.3 Gate J）：
+    /// 先裁遥测事件（统计永不动），incidents 已由 reducer ≤20，仍超限再从尾部减少 incidents。
     /// </summary>
     public sealed class OllamaSessionAnalysisService : ISessionAnalysisService
     {
@@ -43,6 +45,12 @@ namespace AIGeekTuner.Services.SessionAnalysis
             }
             """;
 
+        private static readonly JsonSerializerOptions ContextJsonOptions = new()
+        {
+            WriteIndented = true,
+            Converters = { new JsonStringEnumConverter() },
+        };
+
         private readonly IOllamaChatClient _client;
         private readonly ISessionAnalysisPromptBuilder _promptBuilder;
         private readonly SessionAnalysisJsonParser _parser = new();
@@ -61,20 +69,79 @@ namespace AIGeekTuner.Services.SessionAnalysis
             _modelNameProvider = modelNameProvider;
         }
 
+        /// <summary>V2-M4.3 主入口：组合证据上下文（telemetry + 可选 incidents）→ AI。</summary>
         public async Task<SessionAnalysisRun> AnalyzeAsync(
-            TelemetrySessionAnalyzer.TelemetryAnalysisContext context,
+            DiagnosticEvidenceContext context,
             CancellationToken cancellationToken)
         {
             ArgumentNullException.ThrowIfNull(context);
             var stopwatch = Stopwatch.StartNew();
 
-            var trimmed = TrimContextIfNeeded(context, _maxContextCharacters);
-            var validEvidenceIds = trimmed.Statistics.Select(s => s.EvidenceId)
-                .Concat(trimmed.Events.Select(e => e.EvidenceId))
-                .ToArray();
-            var system = _promptBuilder.BuildSystemPrompt();
-            var user = _promptBuilder.BuildUserPrompt(trimmed);
+            // Gate J 顺序：遥测先压缩（只裁事件，不动统计）→ incidents 已 ≤20 → 仍超限再减 incidents。
+            var telemetry = TrimContextIfNeeded(context.Telemetry, _maxContextCharacters);
+            var combined = context with { Telemetry = telemetry };
+            while (combined.WindowsIncidents is { Incidents.Count: > 0 }
+                && JsonSerializer.Serialize(combined, ContextJsonOptions).Length > _maxContextCharacters)
+            {
+                var current = combined.WindowsIncidents;
+                var keep = current.Incidents.Count - 1;
+                combined = combined with
+                {
+                    WindowsIncidents = current with
+                    {
+                        Incidents = current.Incidents.Take(keep).ToArray(),
+                        IncludedIncidentCount = keep,
+                        OmittedIncidentCount = current.TotalIncidentCount - keep,
+                    },
+                };
+            }
 
+            var contextJson = JsonSerializer.Serialize(combined, ContextJsonOptions);
+            var validEvidenceIds = CollectValidEvidenceIds(combined);
+            var system = _promptBuilder.BuildSystemPrompt();
+            var user = _promptBuilder.BuildUserPrompt(combined);
+
+            return await AnalyzeCoreAsync(system, user, validEvidenceIds, contextJson, stopwatch, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>兼容入口（M3 语义）：telemetry-only，等价于无 Windows incident 证据的组合上下文。</summary>
+        public Task<SessionAnalysisRun> AnalyzeAsync(
+            TelemetrySessionAnalyzer.TelemetryAnalysisContext context,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(context);
+            var trimmed = TrimContextIfNeeded(context, _maxContextCharacters);
+            return AnalyzeAsync(
+                DiagnosticEvidenceContextBuilder.Build(trimmed, incidents: null),
+                cancellationToken);
+        }
+
+        private static IReadOnlyList<string> CollectValidEvidenceIds(DiagnosticEvidenceContext context)
+        {
+            var ids = new List<string>(
+                context.Telemetry.Statistics.Count + context.Telemetry.Events.Count + 8);
+            ids.AddRange(context.Telemetry.Statistics.Select(statistic => statistic.EvidenceId));
+            ids.AddRange(context.Telemetry.Events.Select(@event => @event.EvidenceId));
+            // Gate F：只有实际发送给模型的 incident EvidenceId 才合法；
+            // omitted / 其他 Session 的 incident ID 一律无效（repair 机会与 stat/event 一致）。
+            if (context.WindowsIncidents is not null)
+            {
+                ids.AddRange(context.WindowsIncidents.Incidents.Select(incident => incident.EvidenceId));
+            }
+
+            return ids;
+        }
+
+        /// <summary>共享请求/repair 核心（§23）：最多两次请求；传输层失败不做 repair。</summary>
+        private async Task<SessionAnalysisRun> AnalyzeCoreAsync(
+            string system,
+            string user,
+            IReadOnlyList<string> validEvidenceIds,
+            string evidenceContextJson,
+            Stopwatch stopwatch,
+            CancellationToken cancellationToken)
+        {
             try
             {
                 var first = await _client.ChatAsync(system, user, ResultSchema, think: false, cancellationToken)
@@ -109,13 +176,14 @@ namespace AIGeekTuner.Services.SessionAnalysis
             {
                 // HTTP / 超时等传输层失败不做 repair（§23）。
                 return new SessionAnalysisRun(false, null, exception.Message, [], 1,
-                    stopwatch.Elapsed, "(unavailable)", false);
+                    stopwatch.Elapsed, "(unavailable)", false, evidenceContextJson);
             }
 
             SessionAnalysisRun Done(bool ok, SessionAnalysisResult? result, string? error,
                 IReadOnlyList<string> validationErrors, int requests, bool repairUsed)
                 => new(ok, result, error, validationErrors, requests,
-                    stopwatch.Elapsed, (_modelNameProvider?.Invoke() ?? "(unavailable)"), repairUsed);
+                    stopwatch.Elapsed, (_modelNameProvider?.Invoke() ?? "(unavailable)"), repairUsed,
+                    evidenceContextJson);
         }
 
         internal static TelemetrySessionAnalyzer.TelemetryAnalysisContext TrimContextIfNeeded(
@@ -134,9 +202,3 @@ namespace AIGeekTuner.Services.SessionAnalysis
         }
     }
 }
-
-
-
-
-
-

@@ -74,6 +74,7 @@ namespace AIGeekTuner.ViewModels
         private readonly ITelemetrySessionStore _store;
         private readonly IApplicationSettingsService _settingsService;
         private readonly ISessionIncidentCorrelationService _incidentCorrelation;
+        private readonly ISessionIncidentStore _incidentStore;
 
         private bool _isRecording;
         private bool _hasResult;
@@ -93,7 +94,8 @@ namespace AIGeekTuner.ViewModels
             IVoiceSynthesisService voiceService,
             IWavPlaybackService wavPlayback,
             Func<VoiceConfiguration> voiceSnapshot,
-            ISessionIncidentCorrelationService incidentCorrelation)
+            ISessionIncidentCorrelationService incidentCorrelation,
+            ISessionIncidentStore incidentStore)
         {
             _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
             _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -104,6 +106,7 @@ namespace AIGeekTuner.ViewModels
             _wavPlayback = wavPlayback ?? throw new ArgumentNullException(nameof(wavPlayback));
             _voiceSnapshot = voiceSnapshot ?? throw new ArgumentNullException(nameof(voiceSnapshot));
             _incidentCorrelation = incidentCorrelation ?? throw new ArgumentNullException(nameof(incidentCorrelation));
+            _incidentStore = incidentStore ?? throw new ArgumentNullException(nameof(incidentStore));
 
             AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsAnalyzing);
             PlaySpokenSummaryCommand = new RelayCommand(PlaySpokenSummary, () =>
@@ -454,10 +457,18 @@ namespace AIGeekTuner.ViewModels
             try
             {
                 var summary = session.Summary ?? TelemetrySessionAnalyzer.Analyze(session);
-                var context = TelemetrySessionAnalyzer.BuildAnalysisContext(
+                var telemetryContext = TelemetrySessionAnalyzer.BuildAnalysisContext(
                     session with { Summary = summary });
+
+                // V2-M4.3：组合有界确定性证据（Gate H）。旧 Session 无 incidents.json 属
+                // 合法状态 → telemetry-only；不 backfill、不重新查询 Windows Event Log。
+                // reducer 只影响 AI 输入，incidents.json 原样保留。
+                var incidentEnvelope = _incidentStore.Load(session.Id);
+                var evidenceContext = DiagnosticEvidenceContextBuilder.Build(
+                    telemetryContext, incidentEnvelope);
+
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var run = await _analysisService.AnalyzeAsync(context, CancellationToken.None);
+                var run = await _analysisService.AnalyzeAsync(evidenceContext, CancellationToken.None);
                 sw.Stop();
 
                 if (!run.Success || run.Result is null)
@@ -466,8 +477,11 @@ namespace AIGeekTuner.ViewModels
                     return;
                 }
 
+                // Gate K：ContextJson = AI 实际收到的组合有界上下文（服务层裁剪后），
+                // 用于事后审计“AI 当时看到了什么”。
                 ApplyAnalysis(run.Result, run.ModelName, sw.ElapsedMilliseconds,
-                    JsonSerializer.Serialize(context), session.Id, run.RepairUsed);
+                    run.EvidenceContextJson ?? JsonSerializer.Serialize(evidenceContext),
+                    session.Id, run.RepairUsed);
             }
             catch (OperationCanceledException)
             {

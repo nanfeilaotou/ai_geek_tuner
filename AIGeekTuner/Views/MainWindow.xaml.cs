@@ -135,9 +135,10 @@ namespace AIGeekTuner
             // V2-M4.2：Windows Incident correlation（录制结束后的独立证据采集阶段）。
             // 只读查询本机 System/Application 事件日志；失败由 SessionsViewModel 隔离，
             // 绝不影响已完成的 Telemetry Session。
+            var incidentStore = new SessionIncidentStore(applicationDataPaths.SessionsDirectory);
             var incidentCorrelation = new SessionIncidentCorrelationService(
                 new WindowsEventLogIncidentSource(new WindowsEventRecordReader()),
-                new SessionIncidentStore(applicationDataPaths.SessionsDirectory));
+                incidentStore);
             var voiceHttpClient = new HttpClient();
             var voiceService = new GptSoVitsVoiceSynthesisService(voiceHttpClient);
             var wavPlayback = new SoundPlayerWavPlaybackService();
@@ -164,7 +165,8 @@ namespace AIGeekTuner
                 voiceService,
                 wavPlayback,
                 voiceSnapshot,
-                incidentCorrelation);
+                incidentCorrelation,
+                incidentStore);
 
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(
