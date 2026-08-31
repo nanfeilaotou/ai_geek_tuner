@@ -32,8 +32,10 @@ namespace AIGeekTuner.Services.Telemetry
 
     /// <summary>
     /// Hardware 页实时刷新协调器（§18-§23）。
-    /// 录制中：不启动第二套 Hub 轮询，直接镜像 Recorder.LatestSample；
+    /// 录制中：不启动第二套 Hub 轮询，由 SampleCaptured 镜像推送（§22）；
     /// 否则：PeriodicTimer 串行循环（采样完成→下一拍），绝不重叠。
+    /// 模式切换是自愈的：轮询循环每拍检查 IsRecording，
+    /// 录制开始自动跳过 Hub 读取，录制结束自动恢复。
     /// </summary>
     public sealed class LiveTelemetryCoordinator : ILiveTelemetrySource
     {
@@ -48,6 +50,13 @@ namespace AIGeekTuner.Services.Telemetry
         {
             _hub = hub ?? throw new ArgumentNullException(nameof(hub));
             _recorder = recorder;
+
+            // §22：镜像采样订阅挂接一次即可。是否真正发布由 IsRunning 把关——
+            // 协调器未启动时，录制数据不会泄漏到硬件页。
+            if (_recorder is not null)
+            {
+                _recorder.SampleCaptured += OnRecorderSample;
+            }
         }
 
         public bool IsRunning { get; private set; }
@@ -64,19 +73,18 @@ namespace AIGeekTuner.Services.Telemetry
         {
             lock (_gate)
             {
-                if (IsRecording)
-                {
-                    Mode = LiveTelemetrySourceMode.Recorder;
-                    IsRunning = true;
-                    IntervalMs = _recorder!.CurrentSession!.RequestedIntervalMs;
-                    MirrorRecorderLatest();
-                    return; // 不启动轮询（§22）
-                }
-
                 StopLocked();
                 IntervalMs = Math.Max(200, intervalMs);
-                Mode = LiveTelemetrySourceMode.Coordinator;
+                // 录制中启动时不额外轮询 Hub；循环内每拍检测并跳过读取。
+                Mode = IsRecording
+                    ? LiveTelemetrySourceMode.Recorder
+                    : LiveTelemetrySourceMode.Coordinator;
                 IsRunning = true;
+                if (Mode == LiveTelemetrySourceMode.Recorder)
+                {
+                    MirrorRecorderLatest();
+                }
+
                 _cts = new CancellationTokenSource();
                 var ct = _cts.Token;
                 var capturedInterval = IntervalMs;
@@ -88,8 +96,17 @@ namespace AIGeekTuner.Services.Telemetry
                     {
                         try
                         {
-                            var snapshot = await _hub.ReadAsync(ct).ConfigureAwait(false);
-                            Publish(snapshot);
+                            if (IsRecording)
+                            {
+                                // §22 镜像模式：Recorder 已经在采样，绝不双读 Hub。
+                                Mode = LiveTelemetrySourceMode.Recorder;
+                            }
+                            else
+                            {
+                                Mode = LiveTelemetrySourceMode.Coordinator;
+                                var snapshot = await _hub.ReadAsync(ct).ConfigureAwait(false);
+                                Publish(snapshot);
+                            }
                         }
                         catch (OperationCanceledException)
                         {
@@ -113,24 +130,6 @@ namespace AIGeekTuner.Services.Telemetry
                         }
                     }
                 }, CancellationToken.None);
-            }
-        }
-
-        /// <summary>录制开始时由外部通知：立即切换到镜像模式。</summary>
-        public void NotifyRecorderStarted()
-        {
-            lock (_gate)
-            {
-                if (!IsRunning || Mode != LiveTelemetrySourceMode.Recorder)
-                {
-                    return;
-                }
-
-                StopLocked();
-                Mode = LiveTelemetrySourceMode.Recorder;
-                IsRunning = true;
-                IntervalMs = _recorder?.CurrentSession?.RequestedIntervalMs ?? IntervalMs;
-                MirrorRecorderLatest();
             }
         }
 
@@ -169,40 +168,33 @@ namespace AIGeekTuner.Services.Telemetry
             SnapshotUpdated?.Invoke(snapshot);
         }
 
-        private void HookRecorder()
-        {
-            if (_recorder is null)
-            {
-                return;
-            }
-
-            _recorder.SampleCaptured -= OnRecorderSample;
-            _recorder.SampleCaptured += OnRecorderSample;
-        }
-
-        private void UnhookRecorder()
-        {
-            if (_recorder is not null)
-            {
-                _recorder.SampleCaptured -= OnRecorderSample;
-            }
-        }
-
         private void OnRecorderSample(TelemetrySample sample)
         {
-            var sources = _recorder?.CurrentSession?.InitialSources
+            lock (_gate)
+            {
+                // 只有已启动（无论 Coordinator 还是 Recorder 模式）才镜像推送；
+                // 未启动时静默丢弃，避免录制数据绕过硬件页的显示开关。
+                if (!IsRunning)
+                {
+                    return;
+                }
+
+                Mode = LiveTelemetrySourceMode.Recorder;
+                IntervalMs = _recorder?.CurrentSession?.RequestedIntervalMs ?? IntervalMs;
+            }
+
+            var sourceList = _recorder?.CurrentSession?.InitialSources
                 ?? (IReadOnlyList<TelemetrySourceReport>)Array.Empty<TelemetrySourceReport>();
             Publish(new TelemetrySnapshot(
                 sample.CapturedAtUtc,
                 sample.Readings,
-                sources,
+                sourceList,
                 Array.Empty<RawTelemetryReading>()));
         }
 
         private void StopLocked()
         {
             IsRunning = false;
-            UnhookRecorder();
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
@@ -210,5 +202,3 @@ namespace AIGeekTuner.Services.Telemetry
         }
     }
 }
-
-

@@ -385,10 +385,37 @@
                                        Style="{StaticResource InfoLabelStyle}" Margin="0,8,0,4"/>
                             <TextBox Text="{Binding VoiceReferenceAudioPath, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource SettingsInputStyle}"/>
-                            <TextBlock Text="参考音频转写文本（prompt_text）"
+                            <TextBlock Text="参考音频转写文本"
                                        Style="{StaticResource InfoLabelStyle}" Margin="0,8,0,4"/>
                             <TextBox Text="{Binding VoicePromptText, UpdateSourceTrigger=PropertyChanged}"
                                      Style="{StaticResource SettingsInputStyle}"/>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="参考音频语言"
+                                           Style="{StaticResource InfoLabelStyle}"/>
+                                <ComboBox Grid.Column="1" SelectedValuePath="Tag"
+                                          SelectedValue="{Binding VoicePromptLang}"
+                                          HorizontalAlignment="Left" MinWidth="120">
+                                    <ComboBoxItem Content="中文（zh）" Tag="zh"/>
+                                    <ComboBoxItem Content="日语（ja）" Tag="ja"/>
+                                    <ComboBoxItem Content="英语（en）" Tag="en"/>
+                                </ComboBox>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="合成语速"
+                                           Style="{StaticResource InfoLabelStyle}"/>
+                                <TextBox Grid.Column="1"
+                                         Text="{Binding VoiceSpeedFactorText, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource SettingsInputStyle}" MaxWidth="120"
+                                         HorizontalAlignment="Left"/>
+                            </Grid>
                         </StackPanel>
                     </Border>
                 </StackPanel>

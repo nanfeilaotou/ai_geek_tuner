@@ -40,7 +40,7 @@ namespace AIGeekTuner.Controls
                 return;
             }
 
-            var pen = new Pen(new SolidColorBrush(Color.FromRgb(0x67, 0xD6, 0xED)), 1.2);
+            var pen = new Pen(new SolidColorBrush(Color.FromRgb(0x67, 0xD6, 0xED)), 1.4);
             pen.Freeze();
 
             var points = Points;

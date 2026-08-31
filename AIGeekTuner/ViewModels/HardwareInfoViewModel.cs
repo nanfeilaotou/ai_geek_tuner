@@ -48,6 +48,8 @@ namespace AIGeekTuner.ViewModels
         private bool _hasInitializedSensors;
         private bool _hasDataSources;
         private bool _hasCoreMetrics;
+        private bool _hasTrends;
+        private string _autoRefreshSummary = "自动刷新已关闭";
         private IReadOnlyList<TelemetryDebugRow> _lastDebugRows = [];
 
         public HardwareInfoViewModel(
@@ -66,8 +68,18 @@ namespace AIGeekTuner.ViewModels
                 _liveSource = liveTelemetrySource;
                 _liveSource.SnapshotUpdated += s =>
                 {
+                    // 事件契约：后台线程触发（§15）。趋势缓冲自身线程安全，
+                    // 可即时记录；显示更新必须调度回 UI 线程改 ObservableCollection。
                     _trendBuffer.AddSnapshot(s);
-                    ApplyTelemetrySnapshot(s);
+                    var dispatcher = System.Windows.Application.Current?.Dispatcher;
+                    if (dispatcher is null || dispatcher.CheckAccess())
+                    {
+                        ApplyTelemetrySnapshot(s);
+                    }
+                    else
+                    {
+                        dispatcher.BeginInvoke(() => ApplyTelemetrySnapshot(s));
+                    }
                 };
             }
             _refreshSensorsCommand = new AsyncRelayCommand(
@@ -121,7 +133,14 @@ namespace AIGeekTuner.ViewModels
         }
 
         public string RefreshSensorButtonText =>
-            IsSensorRefreshing ? "正在刷新..." : "刷新实时状态";
+            IsSensorRefreshing ? "正在刷新..." : "立即刷新";
+
+        /// <summary>V2-M3.3 §13：紧凑刷新状态（“自动刷新 · 2 秒”/“自动刷新已关闭”）。</summary>
+        public string AutoRefreshSummary
+        {
+            get => _autoRefreshSummary;
+            private set => SetProperty(ref _autoRefreshSummary, value);
+        }
 
         public ObservableCollection<HardwareSensorGroupViewModel> SensorGroups { get; } = [];
 
@@ -130,6 +149,9 @@ namespace AIGeekTuner.ViewModels
 
         /// <summary>V2-M1：canonical 核心指标分组展示。</summary>
         public ObservableCollection<HardwareSensorGroupViewModel> CoreMetricGroups { get; } = [];
+
+        /// <summary>V2-M3.2：最近 2 分钟 canonical 趋势行（Sparkline 渲染）。</summary>
+        public ObservableCollection<TrendMetricRow> TrendRows { get; } = [];
 
         /// <summary>V2-M1.1：最近一次快照的 Raw 明细（数据源详情对话框用，§25）。</summary>
         public IReadOnlyList<TelemetryDebugRow> LastDebugRows
@@ -151,6 +173,13 @@ namespace AIGeekTuner.ViewModels
         {
             get => _hasCoreMetrics;
             private set => SetProperty(ref _hasCoreMetrics, value);
+        }
+
+        /// <summary>趋势区有数据时为 true（Sparkline 区可见性）。</summary>
+        public bool HasTrends
+        {
+            get => _hasTrends;
+            private set => SetProperty(ref _hasTrends, value);
         }
 
         public AsyncRelayCommand RefreshSensorsCommand =>
@@ -248,30 +277,30 @@ namespace AIGeekTuner.ViewModels
 
             HasDataSources = DataSources.Count > 0;
 
+            // V2-M3.3：普通页面装配收敛到 HardwarePageViewBuilder——
+            // 显示策略（resolved/真实名）+ 核心指标闭集 + 存储名 resolver。
+            // 匿名占位设备仍完整保留在 Raw 明细（数据源详情对话框）。
             CoreMetricGroups.Clear();
-            foreach (var group in snapshot.CanonicalReadings
-                .OrderBy(reading => DeviceOrder(reading.Device.Kind))
-                .ThenBy(reading => reading.Device.DeviceKey, StringComparer.Ordinal)
-                .ThenBy(reading => MetricOrder(reading.MetricKey))
-                .GroupBy(reading => (reading.Device.Kind, reading.Device.DeviceKey)))
+            var cards = HardwarePageViewBuilder.BuildCards(
+                snapshot,
+                MetricLabel,
+                FormatMetricValue,
+                TelemetrySourceStatusViewModel.SourceDisplayName);
+            foreach (var card in cards)
             {
-                var items = group
-                    .Select(reading => (Reading: reading, Label: MetricLabel(reading.MetricKey)))
-                    .Where(entry => entry.Label is not null)
-                    .Select(entry => new HardwareSensorItemViewModel(
-                        entry.Label!,
-                        FormatMetricValue(entry.Reading.Value, entry.Reading.Unit),
-                        TelemetrySourceStatusViewModel.SourceDisplayName(entry.Reading.Source)))
-                    .ToArray();
-                if (items.Length > 0)
-                {
-                    CoreMetricGroups.Add(new HardwareSensorGroupViewModel(
-                        DeviceGroupTitle(group.Key.Kind, group.First().Device.DisplayName),
-                        items));
-                }
+                CoreMetricGroups.Add(new HardwareSensorGroupViewModel(
+                    card.Title,
+                    card.Rows
+                        .Select(row => new HardwareSensorItemViewModel(
+                            row.Label, row.ValueText, row.SourceDisplay))
+                        .ToArray()));
             }
 
             HasCoreMetrics = CoreMetricGroups.Count > 0;
+
+            AutoRefreshSummary = _liveSource is { IsRunning: true } live
+                ? $"自动刷新 · {(live.IntervalMs >= 1000 ? $"{live.IntervalMs / 1000d:0.#} 秒" : $"{live.IntervalMs} ms")}"
+                : "自动刷新已关闭";
 
             // §25 调试明细：Raw → canonical 的对应关系，供验收与调 mapping。
             var canonicalBySource = snapshot.CanonicalReadings
@@ -300,49 +329,31 @@ namespace AIGeekTuner.ViewModels
             DebugVersions = string.Join(" · ", snapshot.Sources
                 .Where(report => report.SourceVersion is not null)
                 .Select(report => $"{TelemetrySourceStatusViewModel.SourceDisplayName(report.Source)} {report.SourceVersion}"));
+
+            RebuildTrendRows(snapshot);
         }
 
-        private static int DeviceOrder(TelemetryDeviceKind kind) =>
-            kind switch
-            {
-                TelemetryDeviceKind.Cpu => 0,
-                TelemetryDeviceKind.Gpu => 1,
-                TelemetryDeviceKind.Memory => 2,
-                TelemetryDeviceKind.Storage => 3,
-                _ => 4
-            };
+        /// <summary>
+        /// V2-M3.3：趋势装配收敛到 HardwarePageViewBuilder（§7 默认核心趋势
+        /// 闭集，策略驱动而非“有数据就画”），来源切换不断线（§37）。
+        /// </summary>
+        private void RebuildTrendRows(TelemetrySnapshot snapshot)
+        {
+            var rows = HardwarePageViewBuilder.BuildTrends(
+                snapshot,
+                _trendBuffer,
+                MetricLabel,
+                FormatMetricValue);
 
-        private static string DeviceGroupTitle(TelemetryDeviceKind kind, string displayName) =>
-            kind switch
+            TrendRows.Clear();
+            foreach (var row in rows)
             {
-                TelemetryDeviceKind.Cpu => $"CPU · {displayName}",
-                TelemetryDeviceKind.Gpu => $"GPU · {displayName}",
-                TelemetryDeviceKind.Memory => "内存",
-                TelemetryDeviceKind.Storage => $"磁盘 · {displayName}",
-                _ => displayName
-            };
+                TrendRows.Add(new TrendMetricRow(
+                    row.Label, row.Current, row.Min, row.Max, row.Points, row.FullName));
+            }
 
-        private static int MetricOrder(TelemetryMetricKey metric) =>
-            metric.Value switch
-            {
-                "cpu.package.temperature" => 0,
-                "cpu.total.utilization" => 1,
-                "cpu.clock" => 2,
-                "cpu.package.power" => 3,
-                "cpu.throttling" => 4,
-                "gpu.core.temperature" => 0,
-                "gpu.hotspot.temperature" => 1,
-                "gpu.memory.temperature" => 2,
-                "gpu.core.utilization" => 3,
-                "gpu.core.clock" => 4,
-                "gpu.board.power" => 5,
-                "gpu.memory.used" => 6,
-                "memory.used" => 0,
-                "memory.utilization" => 1,
-                "memory.clock" => 2,
-                "storage.temperature" => 0,
-                _ => 99
-            };
+            HasTrends = TrendRows.Count > 0;
+        }
 
         private static string? MetricLabel(TelemetryMetricKey metric) =>
             metric.Value switch

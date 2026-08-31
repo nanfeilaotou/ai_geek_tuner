@@ -78,6 +78,9 @@ namespace AIGeekTuner.ViewModels
             VoiceEndpoint = current.Voice.Endpoint;
             VoiceReferenceAudioPath = current.Voice.ReferenceAudioPath;
             VoicePromptText = current.Voice.PromptText;
+            VoicePromptLang = current.Voice.PromptLang;
+            VoiceSpeedFactorText = current.Voice.SpeedFactor.ToString(
+                "0.0##", System.Globalization.CultureInfo.InvariantCulture);
 
             _saveCommand = new AsyncRelayCommand(SaveAsync, () => !IsSaving);
             _refreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsLoadingModels);
@@ -197,6 +200,12 @@ namespace AIGeekTuner.ViewModels
         public string VoiceEndpoint { get; set; } = string.Empty;
         public string VoiceReferenceAudioPath { get; set; } = string.Empty;
         public string VoicePromptText { get; set; } = string.Empty;
+
+        /// <summary>V2-M3.1：参考音频语言（zh / ja / en，范围由 Validator 权威定义）。</summary>
+        public string VoicePromptLang { get; set; } = "ja";
+
+        /// <summary>语速文本（0.7–1.3），保存时统一解析与校验。</summary>
+        public string VoiceSpeedFactorText { get; set; } = "1.0";
 
         public ObservableCollection<string> AvailableModels { get; } = [];
 
@@ -403,6 +412,13 @@ namespace AIGeekTuner.ViewModels
                 return false;
             }
 
+            // V2-M3.1：语速解析（不变文化优先，兼容本机区域小数点）。
+            if (!TryParseSpeed(VoiceSpeedFactorText, out var speedFactor))
+            {
+                validationMessage = "语音速度必须是有效的数字。";
+                return false;
+            }
+
             settings = new ApplicationSettings
             {
                 AutoSaveDiagnosisHistory = AutoSaveDiagnosisHistory,
@@ -418,8 +434,8 @@ namespace AIGeekTuner.ViewModels
                     Endpoint = VoiceEndpoint.Trim(),
                     ReferenceAudioPath = VoiceReferenceAudioPath.Trim(),
                     PromptText = VoicePromptText,
-                    PromptLang = previous.Voice.PromptLang,
-                    SpeedFactor = previous.Voice.SpeedFactor,
+                    PromptLang = VoicePromptLang.Trim(),
+                    SpeedFactor = speedFactor,
                     GptModelPath = previous.Voice.GptModelPath,
                     SovitsModelPath = previous.Voice.SovitsModelPath,
                 }
@@ -452,6 +468,25 @@ namespace AIGeekTuner.ViewModels
                 validationMessage = $"{label}必须是有效的整数。";
                 return false;
             }
+        }
+
+        // V2-M3.1：语速解析（不变文化优先，兼容本机区域小数点）。
+        static bool TryParseSpeed(string text, out double speedFactor)
+        {
+            if (double.TryParse(
+                    text.Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out speedFactor))
+            {
+                return true;
+            }
+
+            return double.TryParse(
+                text.Trim(),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.CurrentCulture,
+                out speedFactor);
         }
 
         private void SetStatus(SettingsStatusKind kind, string message)

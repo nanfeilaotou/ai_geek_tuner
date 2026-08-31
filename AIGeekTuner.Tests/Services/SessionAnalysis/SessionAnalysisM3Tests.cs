@@ -1,3 +1,4 @@
+using AIGeekTuner.Models.Telemetry;
 using System.Text.Json;
 using System.IO;
 using System.Net.Http;
@@ -7,6 +8,7 @@ using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Services.SessionAnalysis;
 using AIGeekTuner.Services.Telemetry.Recording;
 using AIGeekTuner.Services.Voice;
+using AIGeekTuner.Services.Telemetry;
 using Xunit;
 
 namespace AIGeekTuner.Tests.Services.SessionAnalysis
@@ -305,5 +307,45 @@ namespace AIGeekTuner.Tests.Services.SessionAnalysis
 
 
 
+
+
+
+    /// <summary>Gate B 回归：unresolved AIDA GPU 绝不并入具名 NVIDIA 集群。</summary>
+    public class DisplayAggregatorSemanticTests
+    {
+        [Fact]
+        public void UnresolvedAidaGpu_NeverMergesIntoNamedNvidiaCluster()
+        {
+            var snapshot = CreateSnapshotWithUnresolvedAida();
+            var views = HardwareTelemetryDisplayAggregator.Build(
+                snapshot,
+                metric => metric.Value,
+                (v, u) => v.ToString("0.#"),
+                src => src.ToString());
+
+            // nvidia 集群卡片中不允许出现来源为 Aida64 的行。
+            var nvidiaCard = views.FirstOrDefault(v =>
+                v.DisplayName.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase));
+            Assert.NotNull(nvidiaCard);
+            Assert.All(nvidiaCard.Metrics, row =>
+                Assert.NotEqual("Aida64", row.SourceDisplay));
+        }
+
+        private static TelemetrySnapshot CreateSnapshotWithUnresolvedAida()
+        {
+            var nvidiaDevice = TelemetryDeviceIdentity.GpuByIndex(0, "NVIDIA RTX 4080");
+            var aidaGpu = new TelemetryDeviceIdentity(
+                TelemetryDeviceKind.Gpu, "src:Aida64:gpu:0", "GPU #1");
+            return new TelemetrySnapshot(DateTimeOffset.UtcNow,
+            [
+                new TelemetryReading(TelemetryMetricKey.GpuCoreTemperature, 60,
+                    TelemetryUnit.Celsius, nvidiaDevice,
+                    TelemetrySourceKind.LibreHardwareMonitor, "r1", null, DateTimeOffset.UtcNow),
+                new TelemetryReading(TelemetryMetricKey.GpuHotspotTemperature, 65,
+                    TelemetryUnit.Celsius, aidaGpu,
+                    TelemetrySourceKind.Aida64, "r2", null, DateTimeOffset.UtcNow),
+            ], [], []);
+        }
+    }
 
 

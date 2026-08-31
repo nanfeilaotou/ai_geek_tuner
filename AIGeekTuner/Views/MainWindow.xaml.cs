@@ -80,10 +80,51 @@ namespace AIGeekTuner
 
             // V2-M2：Recorder 单实例服务——生命周期独立于页面（§33）。
             var sessionStore = new TelemetrySessionStore(applicationDataPaths);
-            _recordingService = new TelemetryRecordingService(_telemetryHub);
+            // Gate 0.2 Problem A 修复：store 必须注入——否则 finalize 永不落盘 session.json。
+            _recordingService = new TelemetryRecordingService(_telemetryHub, sessionStore);
             var liveTelemetry = new LiveTelemetryCoordinator(_telemetryHub, _recordingService);
 
+            _hardwareInfoViewModel = new HardwareInfoViewModel(
+                _hardwareDetectionService,
+                _hardwareSensorService,
+                _telemetryHub,
+                liveTelemetry);
+            _latestDiagnosisState = new LatestDiagnosisState();
+            _diagnosisHistoryService = new LocalDiagnosisHistoryService(
+                applicationDataPaths);
+            _systemContextCollector = new SystemContextCollector();
+            _knowledgeService = new DiagnosticKnowledgeService();
+            _applicationSettingsService = new JsonApplicationSettingsService(
+                applicationDataPaths);
+            _localDataDirectoryService = new LocalDataDirectoryService(
+                applicationDataPaths);
+
+            // 运行时配置中心：设置页保存后 Replace 新快照，
+            // 下一次诊断立即生效；进行中的诊断持有旧快照不受影响。
+            ConfigurationStore = CreateConfigurationStore(_applicationSettingsService.Current);
+
+            // V2-M3.2：硬件页实时刷新由用户设置驱动（默认开）；窗口关闭时停止。
+            var startupSettings = _applicationSettingsService.Current;
+            if (startupSettings.HardwareAutoRefresh)
+            {
+                liveTelemetry.Start(startupSettings.HardwareRefreshIntervalMs);
+            }
+
+            var aiService = new OllamaService(
+                _httpClient,
+                () => ConfigurationStore.Snapshot().Ollama,
+                new DiagnosticResultParser());
+            _connectionService = new OllamaConnectionService(_httpClient);
+            _settingsViewModel = new SettingsViewModel(
+                _applicationSettingsService,
+                _connectionService,
+                ConfigurationStore,
+                _localDataDirectoryService,
+                _telemetryHub);
+            _liveTelemetryCoordinator = liveTelemetry;
             // V2-M3：Session AI（复用现有 HttpClient 与配置快照原则）+ GPT-SoVITS。
+            // 注意：须在 ConfigurationStore/_applicationSettingsService 赋值之后创建，
+            // 否则可空流分析（CS8602）会认为 lambda 捕获了未初始化的只读属性。
             var analysisChatClient = new OllamaChatClient(
                 _httpClient,
                 () => ConfigurationStore.Snapshot().Ollama);
@@ -106,36 +147,6 @@ namespace AIGeekTuner
                     string.IsNullOrWhiteSpace(voice.SovitsModelPath) ? null : voice.SovitsModelPath);
             };
 
-            _hardwareInfoViewModel = new HardwareInfoViewModel(
-                _hardwareDetectionService,
-                _hardwareSensorService,
-                _telemetryHub);
-            _latestDiagnosisState = new LatestDiagnosisState();
-            _diagnosisHistoryService = new LocalDiagnosisHistoryService(
-                applicationDataPaths);
-            _systemContextCollector = new SystemContextCollector();
-            _knowledgeService = new DiagnosticKnowledgeService();
-            _applicationSettingsService = new JsonApplicationSettingsService(
-                applicationDataPaths);
-            _localDataDirectoryService = new LocalDataDirectoryService(
-                applicationDataPaths);
-
-            // 运行时配置中心：设置页保存后 Replace 新快照，
-            // 下一次诊断立即生效；进行中的诊断持有旧快照不受影响。
-            ConfigurationStore = CreateConfigurationStore(_applicationSettingsService.Current);
-
-            var aiService = new OllamaService(
-                _httpClient,
-                () => ConfigurationStore.Snapshot().Ollama,
-                new DiagnosticResultParser());
-            _connectionService = new OllamaConnectionService(_httpClient);
-            _settingsViewModel = new SettingsViewModel(
-                _applicationSettingsService,
-                _connectionService,
-                ConfigurationStore,
-                _localDataDirectoryService,
-                _telemetryHub);
-            _liveTelemetryCoordinator = liveTelemetry;
             _sessionsViewModel = new SessionsViewModel(
                 _recordingService,
                 sessionStore,
@@ -145,6 +156,7 @@ namespace AIGeekTuner
                 voiceService,
                 wavPlayback,
                 voiceSnapshot);
+
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(
                 aiService,
@@ -177,6 +189,9 @@ namespace AIGeekTuner
 
         protected override void OnClosed(EventArgs e)
         {
+            // V2-M3.2：先停实时轮询再收尾录制，避免镜像模式下双路径并发。
+            _liveTelemetryCoordinator.Stop();
+
             // 录制中的会话 best-effort 收尾（§34）：不阻塞退出超过 5 秒。
             try
             {
@@ -248,5 +263,9 @@ namespace AIGeekTuner
         }
     }
 }
+
+
+
+
 
 

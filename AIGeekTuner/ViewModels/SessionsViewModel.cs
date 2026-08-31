@@ -318,6 +318,38 @@ namespace AIGeekTuner.ViewModels
 
             BuildSummary(full);
             HasResult = true;
+
+            // Gate 0.3：analysis.json 存在则恢复 AI 区；损坏文件 Load 返回 null，
+            // 不影响会话本体加载（session.json 始终是独立事实源）。
+            ResetAnalysisState();
+            var analysis = _analysisStore.Load(full.Id);
+            if (analysis is not null)
+            {
+                ApplyAnalysis(
+                    analysis.Result,
+                    analysis.ModelName,
+                    analysis.DurationMs,
+                    analysis.ContextJson,
+                    analysis.SessionId,
+                    analysis.RepairUsed,
+                    persist: false);
+            }
+        }
+
+        /// <summary>切换会话时清空上一会话的 AI 展示状态（Gate 0.3）。</summary>
+        private void ResetAnalysisState()
+        {
+            HasAnalysis = false;
+            AssessmentBadge = string.Empty;
+            ConfidenceText = string.Empty;
+            AnalysisSummary = string.Empty;
+            AnalysisDurationText = string.Empty;
+            AnalysisError = string.Empty;
+            SpokenSummary = string.Empty;
+            Findings.Clear();
+            Recommendations.Clear();
+            Uncertainties.Clear();
+            VoiceState = VoicePlaybackState.Idle;
         }
 
         private void DeleteRecent()
@@ -411,7 +443,7 @@ namespace AIGeekTuner.ViewModels
                 }
 
                 ApplyAnalysis(run.Result, run.ModelName, sw.ElapsedMilliseconds,
-                    JsonSerializer.Serialize(context), session.Id);
+                    JsonSerializer.Serialize(context), session.Id, run.RepairUsed);
             }
             catch (OperationCanceledException)
             {
@@ -429,12 +461,18 @@ namespace AIGeekTuner.ViewModels
         }
 
         /// <summary>把 AI 结果渲染到界面；证据 ID 映射为可读文本（§30）。</summary>
+        /// <remarks>
+        /// Gate 0.2 Problem B 修复：分析成功即通过 store 落盘 analysis.json；
+        /// 保存失败不吞掉分析结果，仅记录异常（分析 UI 结果保持有效）。
+        /// </remarks>
         private void ApplyAnalysis(
             SessionAnalysisResult result,
             string modelName,
             long durationMs,
             string contextJson,
-            string sessionId)
+            string sessionId,
+            bool repairUsed = false,
+            bool persist = true)
         {
             AssessmentBadge = result.OverallAssessment.ToString();
             ConfidenceText = $"Confidence {result.Confidence * 100:0}%";
@@ -469,9 +507,28 @@ namespace AIGeekTuner.ViewModels
             SpokenSummary = result.SpokenSummary;
             HasAnalysis = true;
             VoiceState = VoicePlaybackState.Idle;
-            void ApplyLocal() { }
-            ApplyLocal();
-            _ = modelName; _ = durationMs; _ = contextJson; _ = sessionId; // 元数据由 store 层持久化
+
+            // Gate 0.2 Problem B：成功分析必须持久化（session.json 不动，§24/§25）。
+            if (persist)
+            {
+                try
+                {
+                    _analysisStore.Save(new SessionAnalysisEnvelope(
+                        SchemaVersion: 1,
+                        SessionId: sessionId,
+                        AnalyzedAtUtc: DateTimeOffset.UtcNow,
+                        ModelName: modelName,
+                        DurationMs: durationMs,
+                        RepairUsed: repairUsed,
+                        Result: result,
+                        ContextJson: contextJson));
+                }
+                catch (Exception exception)
+                {
+                    Services.Diagnostics.ExceptionLogWriter.Write(exception, "SessionAnalysis save");
+                    AnalysisError = "分析结果已生成，但保存 analysis.json 失败。";
+                }
+            }
         }
 
         internal static string DescribeEvidence(string evidenceId)

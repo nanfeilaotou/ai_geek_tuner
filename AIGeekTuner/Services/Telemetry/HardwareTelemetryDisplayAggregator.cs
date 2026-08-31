@@ -63,33 +63,27 @@ namespace AIGeekTuner.Services.Telemetry
             }
 
             var result = new List<HardwareTelemetryDeviceView>(resolvedCards);
+            // §Gate B 修正：unresolved 设备（含 AIDA 匿名 GPU）一律独立成卡，
+            // 不并入任何 resolved 集群。宁可少显示，不可错误归属。
+            // V2-M3.3 产品化：匿名占位设备（GPU #n / HDD #n）连独立卡也不进
+            // 展示结果——数据仍完整存在于 Raw 明细，绝不因减少重复而猜归属。
             foreach (var kindPair in unresolvedByKind)
             {
-                var target = result.FirstOrDefault(card =>
-                    card.Kind == kindPair.Key && card.IsResolvedCluster);
-                if (target is null)
+                foreach (var group in kindPair.Value)
                 {
-                    foreach (var group in kindPair.Value)
+                    var firstReading = group.First();
+                    if (!HardwareDisplayPolicy.IsUserVisible(firstReading.Device))
                     {
-                        var firstReading = group.First();
-                        result.Add(new HardwareTelemetryDeviceView(
-                            firstReading.Device.DeviceKey,
-                            firstReading.Device.Kind,
-                            firstReading.Device.DisplayName + "（" + sourceDisplay(firstReading.Source) + "）",
-                            false,
-                            BuildRows(group, metricLabel, formatValue, sourceDisplay)));
-                    }
-                }
-                else
-                {
-                    var mergedRows = target.Metrics.ToList();
-                    foreach (var group in kindPair.Value)
-                    {
-                        mergedRows.AddRange(BuildRows(group, metricLabel, formatValue, sourceDisplay));
+                        continue;
                     }
 
-                    var index = result.IndexOf(target);
-                    result[index] = target with { Metrics = mergedRows };
+                    var providerTag = firstReading.Source.ToString();
+                    result.Add(new HardwareTelemetryDeviceView(
+                        firstReading.Device.DeviceKey,
+                        firstReading.Device.Kind,
+                        firstReading.Device.DisplayName + "（" + providerTag + "）",
+                        false,
+                        BuildRows(group, metricLabel, formatValue, sourceDisplay)));
                 }
             }
 
@@ -124,4 +118,5 @@ namespace AIGeekTuner.Services.Telemetry
         };
     }
 }
+
 

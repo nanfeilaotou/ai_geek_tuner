@@ -44,10 +44,7 @@
                     <Button Content="◉   数据录制" Command="{Binding ShowSessionsCommand}"
                             Style="{StaticResource NavigationSelectedableStyle}"
                             Tag="Sessions" Margin="0,2"/>
-                    <Button Content="◉   数据录制" Command="{Binding ShowSessionsCommand}"
-                            Style="{StaticResource NavigationSelectedableStyle}"
-                            Tag="Sessions" Margin="0,2"/>
-                    <Button Content="▧   诊断报告" Command="{Binding ShowResultCommand}"
+                                        <Button Content="▧   诊断报告" Command="{Binding ShowResultCommand}"
                             Style="{StaticResource NavigationSelectedableStyle}"
                             Tag="Result" Margin="0,2"/>
                     <Button Content="▤   日志管理" Command="{Binding ShowHistoryCommand}"
