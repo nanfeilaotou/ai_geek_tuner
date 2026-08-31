@@ -9,6 +9,7 @@ using AIGeekTuner.Services.Dialogs;
 using AIGeekTuner.Services.Files;
 using AIGeekTuner.Services.Hardware;
 using AIGeekTuner.Services.History;
+using AIGeekTuner.Services.Incidents;
 using AIGeekTuner.Services.Navigation;
 using AIGeekTuner.Services.Safety;
 using AIGeekTuner.Services.Context;
@@ -130,6 +131,13 @@ namespace AIGeekTuner
                 () => ConfigurationStore.Snapshot().Ollama);
             var analysisService = new OllamaSessionAnalysisService(analysisChatClient, new SessionAnalysisPromptBuilder());
             var analysisStore = new SessionAnalysisStore(applicationDataPaths.SessionsDirectory);
+
+            // V2-M4.2：Windows Incident correlation（录制结束后的独立证据采集阶段）。
+            // 只读查询本机 System/Application 事件日志；失败由 SessionsViewModel 隔离，
+            // 绝不影响已完成的 Telemetry Session。
+            var incidentCorrelation = new SessionIncidentCorrelationService(
+                new WindowsEventLogIncidentSource(new WindowsEventRecordReader()),
+                new SessionIncidentStore(applicationDataPaths.SessionsDirectory));
             var voiceHttpClient = new HttpClient();
             var voiceService = new GptSoVitsVoiceSynthesisService(voiceHttpClient);
             var wavPlayback = new SoundPlayerWavPlaybackService();
@@ -155,7 +163,8 @@ namespace AIGeekTuner
                 analysisStore,
                 voiceService,
                 wavPlayback,
-                voiceSnapshot);
+                voiceSnapshot,
+                incidentCorrelation);
 
             var safetyService = new SafetyGuardService();
             _diagnosisService = new DiagnosisService(

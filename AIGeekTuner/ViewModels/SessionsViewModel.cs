@@ -7,6 +7,7 @@ using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Models.Telemetry;
+using AIGeekTuner.Services.Incidents;
 using AIGeekTuner.Services.SessionAnalysis;
 using AIGeekTuner.Services.Settings;
 using AIGeekTuner.Services.Voice;
@@ -72,6 +73,7 @@ namespace AIGeekTuner.ViewModels
         private readonly ITelemetryRecordingService _recorder;
         private readonly ITelemetrySessionStore _store;
         private readonly IApplicationSettingsService _settingsService;
+        private readonly ISessionIncidentCorrelationService _incidentCorrelation;
 
         private bool _isRecording;
         private bool _hasResult;
@@ -90,7 +92,8 @@ namespace AIGeekTuner.ViewModels
             ISessionAnalysisStore analysisStore,
             IVoiceSynthesisService voiceService,
             IWavPlaybackService wavPlayback,
-            Func<VoiceConfiguration> voiceSnapshot)
+            Func<VoiceConfiguration> voiceSnapshot,
+            ISessionIncidentCorrelationService incidentCorrelation)
         {
             _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
             _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -100,6 +103,7 @@ namespace AIGeekTuner.ViewModels
             _voiceService = voiceService ?? throw new ArgumentNullException(nameof(voiceService));
             _wavPlayback = wavPlayback ?? throw new ArgumentNullException(nameof(wavPlayback));
             _voiceSnapshot = voiceSnapshot ?? throw new ArgumentNullException(nameof(voiceSnapshot));
+            _incidentCorrelation = incidentCorrelation ?? throw new ArgumentNullException(nameof(incidentCorrelation));
 
             AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsAnalyzing);
             PlaySpokenSummaryCommand = new RelayCommand(PlaySpokenSummary, () =>
@@ -233,6 +237,26 @@ namespace AIGeekTuner.ViewModels
             BuildSummary(session);
             SyncFromRecorder();
             LoadRecent();
+
+            // V2-M4.2：录制结束后的独立 Windows 证据采集阶段（Recorder 本身不碰事件日志）。
+            await CaptureIncidentsAsync(session).ConfigureAwait(true);
+        }
+
+        /// <summary>
+        /// Gate E 失败隔离：session.json 成功 + incidents 采集/落盘失败时，
+        /// Session 仍然有效。仅留痕，不改录制结果；查询失败状态（Partial 等）
+        /// 由 correlation service 照常写入 envelope，不算异常。本轮不加 UI 错误框。
+        /// </summary>
+        private async Task CaptureIncidentsAsync(TelemetryRecordingSession session)
+        {
+            try
+            {
+                await _incidentCorrelation.CaptureAsync(session).ConfigureAwait(true);
+            }
+            catch (Exception exception)
+            {
+                Services.Diagnostics.ExceptionLogWriter.Write(exception, "Session incidents capture");
+            }
         }
 
         /// <summary>由页面定时器驱动；只读最新状态并更新少量行（§45）。</summary>
