@@ -15,6 +15,14 @@ namespace AIGeekTuner.Models.Telemetry
         public static TelemetryDeviceIdentity Memory(string displayName) =>
             new(TelemetryDeviceKind.Memory, "memory", displayName);
 
+        /// <summary>
+        /// V2-M4.5B Gate C：单根内存模块身份。
+        /// <paramref name="moduleKey"/> 是 provider 源本地模块标识（如 memory-module:0）；
+        /// 跨 provider 合并由 Reconciler 依据证据决定，provider 不得直接宣布。
+        /// </summary>
+        public static TelemetryDeviceIdentity MemoryModule(string moduleKey, string displayName) =>
+            new(TelemetryDeviceKind.MemoryModule, moduleKey, displayName);
+
         public static TelemetryDeviceIdentity SystemBoard(string displayName) =>
             new(TelemetryDeviceKind.System, "system", displayName);
 

@@ -192,6 +192,16 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
                             identity = TelemetryDeviceIdentity.GpuByIndex(ordinal, node.Name);
                             nativeId = identity.DeviceKey;
                         }
+                        else if (node.Type == HardwareType.Memory
+                            && MemoryModuleSensorNames.TryGetModuleIndex(node.Name, out var moduleIndex))
+                        {
+                            // V2-M4.5B Gate F：LHM 的每模块硬件（RAM Module #N）独立于
+                            // 聚合 Memory 硬件，明确模块 parent 才给 MemoryModule 身份。
+                            identity = TelemetryDeviceIdentity.MemoryModule(
+                                $"memory-module:{moduleIndex}", node.Name);
+                            nativeId = identity.DeviceKey;
+                            ordinal = moduleIndex;
+                        }
                         else if (node.Type == HardwareType.Memory)
                         {
                             identity = TelemetryDeviceIdentity.Memory(node.Name);

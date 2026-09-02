@@ -40,7 +40,10 @@ namespace AIGeekTuner.Models.Hardware.Inventory
         IReadOnlyList<MonitorInventoryInfo> Monitors,
         IReadOnlyList<AudioDeviceInfo> AudioDevices,
         IReadOnlyList<NetworkAdapterInventoryInfo> NetworkAdapters,
-        DateTimeOffset CollectedAtUtc);
+        DateTimeOffset CollectedAtUtc,
+        // V2-M4.5B：hardware audio controller supplement（Win32_SoundDevice）。
+        // CoreAudio endpoints 是端点不是硬件；Dashboard/详情页优先展示硬件控制器。
+        IReadOnlyList<AudioControllerInfo>? AudioControllers = null);
 
     public sealed record CpuInventoryInfo(
         string? Name,
@@ -137,6 +140,17 @@ namespace AIGeekTuner.Models.Hardware.Inventory
         double? CurrentRefreshRateHz,
         bool? IsPrimary,
         string? EdidIdentity,
+        InventorySource Source);
+
+    /// <summary>
+    /// V2-M4.5B：hardware audio controller（Win32_SoundDevice）。
+    /// 与 CoreAudio endpoint 分层：controller 是硬件，endpoint 是系统端点。
+    /// </summary>
+    public sealed record AudioControllerInfo(
+        string? Name,
+        string? Manufacturer,
+        string? Status,
+        string? PnpDeviceId,
         InventorySource Source);
 
     public sealed record AudioDeviceInfo(

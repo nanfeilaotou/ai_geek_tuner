@@ -75,6 +75,9 @@ namespace AIGeekTuner.Services.Hardware.Inventory
             var monitors = ListSection("Monitor", CollectMonitors);
             var audio = ListSection("Audio", () => AudioInventoryMapper.Map(
                 _audioEndpoints.GetEndpoints()));
+            // V2-M4.5B：hardware audio controller supplement（Win32_SoundDevice）。
+            var audioControllers = ListSection("AudioController", () =>
+                SystemInventoryMappers.MapAudioControllers(_wmi.Query("Win32_SoundDevice")));
             var network = ListSection("Network", () => NetworkInventoryMapper.Map(
                 _networkAdapters.GetAdapters()));
 
@@ -89,7 +92,8 @@ namespace AIGeekTuner.Services.Hardware.Inventory
                 Monitors: monitors,
                 AudioDevices: audio,
                 NetworkAdapters: network,
-                CollectedAtUtc: DateTimeOffset.UtcNow);
+                CollectedAtUtc: DateTimeOffset.UtcNow,
+                AudioControllers: audioControllers);
         }
 
         private IReadOnlyList<MonitorInventoryInfo> CollectMonitors()

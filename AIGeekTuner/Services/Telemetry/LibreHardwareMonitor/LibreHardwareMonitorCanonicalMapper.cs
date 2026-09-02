@@ -21,6 +21,7 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
             MapCpu(rawReadings, result);
             MapGpus(rawReadings, result);
             MapMemory(rawReadings, result);
+            MapMemoryModules(rawReadings, result);
             MapStorage(rawReadings, result);
 
             return result;
@@ -139,6 +140,39 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
                     used.SourceMetricId,
                     used.Label,
                     used.CapturedAtUtc));
+            }
+        }
+
+        /// <summary>
+        /// V2-M4.5B Gate F：LHM per-module 内存温度。只有父设备明确是模块硬件
+        /// （MemoryModule 身份，即 LHM 的 "RAM Module #N" 类节点）+ 精确 label
+        /// "Temperature" + 摄氏度 + 数值合理才映射；LHM 不提供时如实缺失，不制造。
+        /// </summary>
+        private static void MapMemoryModules(
+            IReadOnlyList<RawTelemetryReading> rawReadings,
+            ICollection<TelemetryReading> result)
+        {
+            foreach (var reading in rawReadings)
+            {
+                if (reading.Device.Kind != TelemetryDeviceKind.MemoryModule
+                    || reading.Unit != TelemetryUnit.Celsius
+                    || !reading.Label.Trim().Equals(
+                        MemoryModuleSensorNames.ModuleTemperatureLabel,
+                        StringComparison.OrdinalIgnoreCase)
+                    || !MemoryModuleSensorNames.IsPlausibleTemperature(reading.Value))
+                {
+                    continue;
+                }
+
+                result.Add(new TelemetryReading(
+                    TelemetryMetricKey.MemoryModuleTemperature,
+                    reading.Value,
+                    TelemetryUnit.Celsius,
+                    reading.Device,
+                    reading.Source,
+                    reading.SourceMetricId,
+                    reading.Label,
+                    reading.CapturedAtUtc));
             }
         }
 

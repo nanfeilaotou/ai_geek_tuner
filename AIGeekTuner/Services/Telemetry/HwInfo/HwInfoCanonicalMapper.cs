@@ -40,6 +40,27 @@ namespace AIGeekTuner.Services.Telemetry.HwInfo
                 var unit = ResolveUnit(reading);
                 var label = reading.Label.Trim();
 
+                // V2-M4.5B Gate D：DDR5 per-module SPD Hub Temperature。
+                // 必须同时满足：父传感器明确是模块传感器（RAM Module #N / DIMM N）
+                // + label 精确匹配 + 摄氏度 + 数值合理；原始 label 原样保留在 SourceLabel。
+                if (unit == TelemetryUnit.Celsius
+                    && LabelEquals(label, MemoryModuleSensorNames.SpdHubTemperatureLabel)
+                    && MemoryModuleSensorNames.TryGetModuleIndex(sensorName, out var moduleIndex)
+                    && MemoryModuleSensorNames.IsPlausibleTemperature(reading.Value))
+                {
+                    result.Add(new TelemetryReading(
+                        TelemetryMetricKey.MemoryModuleTemperature,
+                        reading.Value,
+                        TelemetryUnit.Celsius,
+                        TelemetryDeviceIdentity.MemoryModule(
+                            $"memory-module:{moduleIndex}", sensorName),
+                        TelemetrySourceKind.HwInfo,
+                        CompositeSourceId(reading),
+                        reading.Label,
+                        capturedAtUtc));
+                    continue;
+                }
+
                 if (IsFamily(sensorName, "CPU"))
                 {
                     MapCpuReading(result, reading, label, unit, capturedAtUtc);
@@ -283,6 +304,19 @@ namespace AIGeekTuner.Services.Telemetry.HwInfo
                 return new SourceDeviceInfo(
                     TelemetrySourceKind.HwInfo, TelemetryDeviceKind.Gpu,
                     $"gpu:{sensorIndex}", sensor.SensorName, ordinal, []);
+            }
+
+            // V2-M4.5B：每模块传感器（RAM Module #N / DIMM N / DDR5 DIMM [#N] (…)）
+            // 优先于泛 Memory 家族；DDR5 命名里的 DeviceLocator 是强身份证据。
+            if (MemoryModuleSensorNames.TryGetModuleIndex(sensor.SensorName, out var moduleIndex))
+            {
+                var strongIds = MemoryModuleSensorNames.TryGetModuleDeviceLocator(
+                    sensor.SensorName, out var locator)
+                    ? ["locator:" + locator]
+                    : Array.Empty<string>();
+                return new SourceDeviceInfo(
+                    TelemetrySourceKind.HwInfo, TelemetryDeviceKind.MemoryModule,
+                    $"memory-module:{moduleIndex}", sensor.SensorName, moduleIndex, strongIds);
             }
 
             if (IsFamily(sensor.SensorName, "RAM") || IsFamily(sensor.SensorName, "Memory"))

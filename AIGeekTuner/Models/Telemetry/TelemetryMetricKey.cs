@@ -24,6 +24,12 @@ namespace AIGeekTuner.Models.Telemetry
         public static readonly TelemetryMetricKey MemoryUtilization = new("memory.utilization");
         public static readonly TelemetryMetricKey MemoryClock = new("memory.clock");
 
+        /// <summary>
+        /// V2-M4.5B Gate C：per-module 内存温度（每条 DIMM 独立 DeviceKey）。
+        /// DDR5 语义：读数来自 SPD Hub 温度传感器（Gate D），不代表 DRAM die 结温。
+        /// </summary>
+        public static readonly TelemetryMetricKey MemoryModuleTemperature = new("memory.module.temperature");
+
         public static readonly TelemetryMetricKey StorageTemperature = new("storage.temperature");
 
         public override string ToString() => Value;

@@ -1,8 +1,11 @@
 using System.Collections.ObjectModel;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Models;
+using AIGeekTuner.Models.Hardware.Inventory;
 using AIGeekTuner.Models.Telemetry;
 using AIGeekTuner.Services.Hardware;
+using AIGeekTuner.Services.Hardware.Inventory;
+using AIGeekTuner.Services.Hardware.Inventory.Presentation;
 using AIGeekTuner.Services.Telemetry;
 using AIGeekTuner.Services.Telemetry.Recording;
 
@@ -12,6 +15,7 @@ namespace AIGeekTuner.ViewModels
     {
         private readonly IHardwareDetectionService _hardwareDetectionService;
         private readonly IHardwareSensorService _hardwareSensorService;
+        private readonly IHardwareInventoryService? _hardwareInventoryService;
         private readonly ITelemetryHub? _telemetryHub;
         private readonly ILiveTelemetrySource? _liveSource;
         private readonly TelemetryTrendBuffer _trendBuffer = new(TimeSpan.FromMinutes(2));
@@ -56,12 +60,14 @@ namespace AIGeekTuner.ViewModels
             IHardwareDetectionService hardwareDetectionService,
             IHardwareSensorService hardwareSensorService,
             ITelemetryHub? telemetryHub = null,
-            ILiveTelemetrySource? liveTelemetrySource = null)
+            ILiveTelemetrySource? liveTelemetrySource = null,
+            IHardwareInventoryService? hardwareInventoryService = null)
         {
             _hardwareDetectionService = hardwareDetectionService
                 ?? throw new ArgumentNullException(nameof(hardwareDetectionService));
             _hardwareSensorService = hardwareSensorService
                 ?? throw new ArgumentNullException(nameof(hardwareSensorService));
+            _hardwareInventoryService = hardwareInventoryService;
             _telemetryHub = telemetryHub;
             if (liveTelemetrySource is not null)
             {
@@ -142,6 +148,18 @@ namespace AIGeekTuner.ViewModels
             private set => SetProperty(ref _autoRefreshSummary, value);
         }
 
+        /// <summary>V2-M4.5B Gate A：Dashboard "电脑详细信息" 固定顺序行。</summary>
+        public ObservableCollection<InventoryDisplayRowViewModel> DashboardDetailRows { get; } = [];
+
+        /// <summary>Dashboard 详情行已装配（inventory 可用）。</summary>
+        public bool HasDashboardDetails { get; private set; }
+
+        /// <summary>V2-M4.5B Gate B：Hardware 详情页左侧静态 Inventory 分区。</summary>
+        public ObservableCollection<InventoryDisplaySectionViewModel> InventorySections { get; } = [];
+
+        /// <summary>静态 Inventory 详情可用（ legacy 分组收起）。</summary>
+        public bool HasInventoryDetail { get; private set; }
+
         public ObservableCollection<HardwareSensorGroupViewModel> SensorGroups { get; } = [];
 
         /// <summary>V2-M1：统一遥测数据源状态（紧凑区）。</summary>
@@ -205,6 +223,7 @@ namespace AIGeekTuner.ViewModels
                 RuntimeStatus = HasKnownData(hardware)
                     ? "真实硬件信息已读取"
                     : "检测完成，但系统未返回可用字段";
+                await LoadInventoryAsync();
             }
             catch
             {
@@ -388,6 +407,56 @@ namespace AIGeekTuner.ViewModels
                 TelemetryUnit.Byte => $"{value / 1073741824d:0.##} GB",
                 _ => $"{value:0.###}"
             };
+
+        /// <summary>
+        /// V2-M4.5B Gate A/B：静态 Inventory → Dashboard 行 + 详情页分区。
+        /// 单独 try/catch（Gate M 语义）：inventory 失败只影响新区块，
+        /// 绝不清空既有静态硬件/实时遥测展示。
+        /// </summary>
+        private async Task LoadInventoryAsync()
+        {
+            if (_hardwareInventoryService is null)
+            {
+                return;
+            }
+
+            try
+            {
+                var snapshot = await _hardwareInventoryService.CollectAsync();
+                ApplyInventory(snapshot);
+            }
+            catch
+            {
+                // 保持现有展示；inventory 缺席时 Dashboard/Hardware 回退到 legacy 分组。
+            }
+        }
+
+        private void ApplyInventory(HardwareInventorySnapshot snapshot)
+        {
+            DashboardDetailRows.Clear();
+            foreach (var row in DashboardInventoryPresenter.BuildRows(snapshot))
+            {
+                DashboardDetailRows.Add(new InventoryDisplayRowViewModel(row.Label, row.Value));
+            }
+
+            HasDashboardDetails = DashboardDetailRows.Count > 0;
+
+            InventorySections.Clear();
+            foreach (var section in HardwareInventoryDetailPresenter.BuildSections(snapshot))
+            {
+                InventorySections.Add(new InventoryDisplaySectionViewModel(
+                    section.Title,
+                    section.Cards
+                        .Select(card => new InventoryDisplayCardViewModel(
+                            card.Title,
+                            card.Rows
+                                .Select(row => new InventoryDisplayRowViewModel(row.Label, row.Value))
+                                .ToArray()))
+                        .ToArray()));
+            }
+
+            HasInventoryDetail = InventorySections.Count > 0;
+        }
 
         private void ApplyStaticHardware(HardwareInfo hardware)
         {

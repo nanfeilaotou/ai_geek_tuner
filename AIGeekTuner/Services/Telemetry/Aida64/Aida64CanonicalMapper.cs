@@ -35,6 +35,12 @@ namespace AIGeekTuner.Services.Telemetry.Aida64
         [GeneratedRegex("^THDD(\\d{1,3})$", RegexOptions.IgnoreCase)]
         private static partial Regex StorageTemperatureRegex();
 
+        // V2-M4.5B Gate E：官方 External Application Sensor IDs TDIMM1..TDIMM4。
+        // 仅带序号的 per-DIMM ID 允许映射到 source-local 模块身份；
+        // 泛 "TDIMM"（无序号）与 TDIMMTS1..64 无法证明对应具体模块 → 只保留 raw。
+        [GeneratedRegex("^TDIMM([1-4])$", RegexOptions.IgnoreCase)]
+        private static partial Regex DimmTemperatureRegex();
+
         // CPU 温度候选的官方 ID 优先级：Package > Tctl > 通用 CPU。
         private static readonly IReadOnlyList<string> CpuTemperatureIdPriority =
         [
@@ -146,6 +152,27 @@ namespace AIGeekTuner.Services.Telemetry.Aida64
             foreach (var reading in rawReadings)
             {
                 var id = reading.SourceMetricId;
+
+                // V2-M4.5B Gate E：TDIMM1..TDIMM4 → per-module 内存温度。
+                // 泛 TDIMM / TDIMMTS 不匹配本 regex，保持 raw（不挂到具体模块）。
+                var dimmTemp = DimmTemperatureRegex().Match(id);
+                if (dimmTemp.Success
+                    && reading.Unit == TelemetryUnit.Celsius
+                    && MemoryModuleSensorNames.IsPlausibleTemperature(reading.Value))
+                {
+                    var dimmIndex = int.Parse(dimmTemp.Groups[1].Value, CultureInfo.InvariantCulture);
+                    result.Add(new TelemetryReading(
+                        TelemetryMetricKey.MemoryModuleTemperature,
+                        reading.Value,
+                        TelemetryUnit.Celsius,
+                        TelemetryDeviceIdentity.MemoryModule(
+                            $"memory-module:{dimmIndex}", $"DIMM #{dimmIndex}"),
+                        reading.Source,
+                        reading.SourceMetricId,
+                        reading.Label,
+                        reading.CapturedAtUtc));
+                    continue;
+                }
 
                 var coreTemp = GpuCoreTemperature().Match(id);
                 if (coreTemp.Success)
@@ -382,6 +409,17 @@ namespace AIGeekTuner.Services.Telemetry.Aida64
                 && int.TryParse(hdd.Groups[1].Value, out var hddIndex))
             {
                 device = TelemetryDeviceIdentity.Storage($"hdd:{hddIndex}", $"HDD #{hddIndex}");
+                unit = TelemetryUnit.Celsius;
+                return true;
+            }
+
+            var dimm = DimmTemperatureRegex().Match(id);
+            if (dimm.Success
+                && int.TryParse(dimm.Groups[1].Value, out var dimmIndex))
+            {
+                // Gate E：AIDA source ordinal 只作 AIDA source-local module identity。
+                device = TelemetryDeviceIdentity.MemoryModule(
+                    $"memory-module:{dimmIndex}", $"DIMM #{dimmIndex}");
                 unit = TelemetryUnit.Celsius;
                 return true;
             }

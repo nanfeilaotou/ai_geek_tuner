@@ -6,9 +6,10 @@ namespace AIGeekTuner.Tests.Models.Telemetry
     public class TelemetryMetricCatalogTests
     {
         [Fact]
-        public void Catalog_ContainsExactlySixteenMetrics()
+        public void Catalog_ContainsExactlySeventeenMetrics()
         {
-            Assert.Equal(16, TelemetryMetricCatalog.All.Count);
+            // V2-M4.5B：+ memory.module.temperature（per-DIMM 温度）→ 17。
+            Assert.Equal(17, TelemetryMetricCatalog.All.Count);
         }
 
         [Fact]

@@ -110,6 +110,34 @@ namespace AIGeekTuner.Services.Hardware.Inventory
             _ => null, // 不确定就不显示，不填 Unknown。
         };
 
+        /// <summary>
+        /// V2-M4.5B：Win32_SoundDevice → hardware audio controller supplement。
+        /// 很小的补充映射，不改 Audio endpoint domain；占位符名称直接跳过。
+        /// </summary>
+        public static IReadOnlyList<AudioControllerInfo> MapAudioControllers(
+            IReadOnlyList<IInventoryRow> soundDevices)
+        {
+            var result = new List<AudioControllerInfo>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in soundDevices)
+            {
+                var name = row.String("Name");
+                if (string.IsNullOrWhiteSpace(name) || !seen.Add(name))
+                {
+                    continue;
+                }
+
+                result.Add(new AudioControllerInfo(
+                    Name: name,
+                    Manufacturer: row.String("Manufacturer"),
+                    Status: row.String("Status"),
+                    PnpDeviceId: row.String("PNPDeviceID"),
+                    Source: InventorySource.Wmi));
+            }
+
+            return result;
+        }
+
         public static MotherboardInventoryInfo? MapMotherboard(IReadOnlyList<IInventoryRow> baseBoards)
         {
             foreach (var row in baseBoards)

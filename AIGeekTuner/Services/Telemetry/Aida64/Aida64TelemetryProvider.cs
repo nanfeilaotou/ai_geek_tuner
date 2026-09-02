@@ -133,6 +133,16 @@ namespace AIGeekTuner.Services.Telemetry.Aida64
                         nativeName,
                         hddOrdinal - 1,
                         []),
+                _ when device.DeviceKey.StartsWith("memory-module:", StringComparison.Ordinal)
+                    && int.TryParse(device.DeviceKey.AsSpan("memory-module:".Length), out var moduleOrdinal) =>
+                    // V2-M4.5B Gate E：source-local 模块事实，供 Reconciler 评估。
+                    new SourceDeviceInfo(
+                        TelemetrySourceKind.Aida64,
+                        TelemetryDeviceKind.MemoryModule,
+                        device.DeviceKey,
+                        nativeName,
+                        moduleOrdinal,
+                        []),
                 _ => new SourceDeviceInfo(
                     TelemetrySourceKind.Aida64,
                     TelemetryDeviceKind.System,

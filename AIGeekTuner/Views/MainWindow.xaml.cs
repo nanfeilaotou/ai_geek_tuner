@@ -102,7 +102,8 @@ namespace AIGeekTuner
                 _hardwareDetectionService,
                 _hardwareSensorService,
                 _telemetryHub,
-                liveTelemetry);
+                liveTelemetry,
+                HardwareInventory);
             _latestDiagnosisState = new LatestDiagnosisState();
             _diagnosisHistoryService = new LocalDiagnosisHistoryService(
                 applicationDataPaths);

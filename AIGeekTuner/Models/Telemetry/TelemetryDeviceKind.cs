@@ -11,6 +11,9 @@ namespace AIGeekTuner.Models.Telemetry
 
         Memory = 3,
 
-        Storage = 4
+        Storage = 4,
+
+        /// <summary>V2-M4.5B：单根内存模块（DIMM）。DeviceKey 形如 memory-module:N。</summary>
+        MemoryModule = 5
     }
 }

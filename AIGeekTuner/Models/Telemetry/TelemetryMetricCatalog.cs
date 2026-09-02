@@ -34,6 +34,8 @@ namespace AIGeekTuner.Models.Telemetry
             TelemetryMetricKey.MemoryUsed,
             TelemetryMetricKey.MemoryUtilization,
             TelemetryMetricKey.MemoryClock,
+            // V2-M4.5B Gate C：per-module 温度（每根 DIMM 一个 DeviceKey）。
+            TelemetryMetricKey.MemoryModuleTemperature,
         ];
 
         public static IReadOnlyList<TelemetryMetricKey> Storage { get; } =
