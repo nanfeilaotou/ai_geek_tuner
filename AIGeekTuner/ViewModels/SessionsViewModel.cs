@@ -3,8 +3,11 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.IO;
 using System.Windows.Input;
+using System.ComponentModel;
+using System.Globalization;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
+using AIGeekTuner.Models.Incidents;
 using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Models.Telemetry;
 using AIGeekTuner.Services.Incidents;
@@ -65,6 +68,107 @@ namespace AIGeekTuner.ViewModels
         public string TimeText { get; }
         public string Headline { get; }
         public string Detail { get; }
+    }
+
+    /// <summary>
+    /// Windows 事件证据的极小展示行（V2-M4.4 Gate B）：
+    /// 不建立新业务 Model、不修改 WindowsIncident。EvidenceId 不作为主 UI 文本，
+    /// 仅用于 Tooltip 与 AI evidence mapping。Severity 是 Windows Event Level，
+    /// 不是对硬件健康的判断——只用一个小圆点表达，绝不说“危险/严重故障”。
+    /// </summary>
+    public sealed class SessionIncidentRow : INotifyPropertyChanged
+    {
+        private bool _isInAiContext;
+
+        public SessionIncidentRow(WindowsIncident incident, bool isInAiContext)
+        {
+            EvidenceId = incident.EvidenceId;
+            OccurredAtLocal = incident.OccurredAtUtc.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            CategoryDisplay = CategoryDisplayName(incident.Category);
+            Severity = incident.Severity;
+            Summary = incident.Summary;
+            ProviderEventText = incident.ProviderName + " · Event " + incident.EventId;
+            RowToolTip = incident.ProviderName + " · Event " + incident.EventId
+                + "\nChannel: " + incident.Channel
+                + " · RecordId: " + (incident.RecordId?.ToString(CultureInfo.InvariantCulture) ?? "-")
+                + "\n" + incident.Summary
+                + "\nEvidenceId: " + incident.EvidenceId;
+            SeverityBrush = SeverityBrushOf(incident.Severity);
+            SeverityToolTip = "Windows 事件级别：" + SeverityLevelLabel(incident.Severity);
+            _isInAiContext = isInAiContext;
+        }
+
+        public string EvidenceId { get; }
+        public string OccurredAtLocal { get; }
+        public string CategoryDisplay { get; }
+        public IncidentSeverity Severity { get; }
+        public string Summary { get; }
+        public string ProviderEventText { get; }
+        public string RowToolTip { get; }
+        public System.Windows.Media.Brush SeverityBrush { get; }
+        public string SeverityToolTip { get; }
+
+        public bool IsInAiContext => _isInAiContext;
+        public bool HasAiMarker => _isInAiContext;
+        public string AiMarkerText => _isInAiContext ? "AI 分析上下文" : string.Empty;
+
+        /// <summary>Gate H：只标记真正进入 AI 分析上下文的 incident（reducer omitted 的不标）。</summary>
+        public void SetAiContext(bool isInAiContext)
+        {
+            if (_isInAiContext == isInAiContext)
+            {
+                return;
+            }
+
+            _isInAiContext = isInAiContext;
+            OnPropertyChanged(nameof(IsInAiContext));
+            OnPropertyChanged(nameof(HasAiMarker));
+            OnPropertyChanged(nameof(AiMarkerText));
+        }
+
+        // Gate E：用户可见类别名，不显示 enum 原名。
+        public static string CategoryDisplayName(IncidentCategory category) => category switch
+        {
+            IncidentCategory.UnexpectedShutdown => "非正常关机",
+            IncidentCategory.BugCheck => "蓝屏 / BugCheck",
+            IncidentCategory.HardwareError => "硬件错误",
+            IncidentCategory.DisplayDriver => "显示驱动事件",
+            IncidentCategory.Storage => "存储事件",
+            IncidentCategory.ApplicationCrash => "应用崩溃",
+            IncidentCategory.ApplicationHang => "应用无响应",
+            IncidentCategory.WindowsErrorReporting => "Windows 错误报告",
+            _ => "其他事件",
+        };
+
+        // Gate F：只呈现 Windows Event Level 事实，不做健康判断。
+        public static string SeverityLevelLabel(IncidentSeverity severity) => severity switch
+        {
+            IncidentSeverity.Critical => "Critical",
+            IncidentSeverity.Error => "Error",
+            IncidentSeverity.Warning => "Warning",
+            _ => "Information",
+        };
+
+        private static System.Windows.Media.Brush SeverityBrushOf(IncidentSeverity severity) => severity switch
+        {
+            IncidentSeverity.Critical => Frozen("#FF6B6B"),
+            IncidentSeverity.Error => Frozen("#FF9A62"),
+            IncidentSeverity.Warning => Frozen("#FFE08A"),
+            _ => Frozen("#9FD9EA"),
+        };
+
+        private static System.Windows.Media.Brush Frozen(string hex)
+        {
+            var brush = new System.Windows.Media.SolidColorBrush(
+                (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
+            brush.Freeze();
+            return brush;
+        }
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        private void OnPropertyChanged(string propertyName) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
     /// <summary>V2-M2 数据录制页 ViewModel：空态 / 录制中 / 摘要三态。</summary>
@@ -181,6 +285,31 @@ namespace AIGeekTuner.ViewModels
 
         public RelayCommand PlaySpokenSummaryCommand { get; }
 
+        // ---- V2-M4.4：Windows 事件证据展示（只读 incidents.json，不重新查询） ----
+        /// <summary>UI display cap：只影响展示，不修改 incidents.json、不影响 AI reducer（Gate G）。</summary>
+        public const int IncidentDisplayCap = 50;
+
+        private readonly Dictionary<string, string> _incidentEvidenceLookup = new(StringComparer.Ordinal);
+        private string _incidentHeaderText = "Windows 事件证据";
+        private string _incidentStateText = string.Empty;
+        private string _incidentQualityText = string.Empty;
+        private bool _hasIncidentQualityText;
+        private string _incidentOverflowText = string.Empty;
+        private bool _hasIncidentRows;
+        private bool _hasIncidentStateText;
+        private bool _hasIncidentOverflow;
+
+        public ObservableCollection<SessionIncidentRow> IncidentRows { get; } = [];
+
+        public string IncidentHeaderText { get => _incidentHeaderText; private set => SetProperty(ref _incidentHeaderText, value); }
+        public string IncidentStateText { get => _incidentStateText; private set => SetProperty(ref _incidentStateText, value); }
+        public string IncidentQualityText { get => _incidentQualityText; private set => SetProperty(ref _incidentQualityText, value); }
+        public bool HasIncidentQualityText { get => _hasIncidentQualityText; private set => SetProperty(ref _hasIncidentQualityText, value); }
+        public string IncidentOverflowText { get => _incidentOverflowText; private set => SetProperty(ref _incidentOverflowText, value); }
+        public bool HasIncidentRows { get => _hasIncidentRows; private set => SetProperty(ref _hasIncidentRows, value); }
+        public bool HasIncidentStateText { get => _hasIncidentStateText; private set => SetProperty(ref _hasIncidentStateText, value); }
+        public bool HasIncidentOverflow { get => _hasIncidentOverflow; private set => SetProperty(ref _hasIncidentOverflow, value); }
+
         public string SpokenSummary { get => _spokenSummary; private set => SetProperty(ref _spokenSummary, value); }
         public string VoiceStateText { get => _voiceStateText; private set => SetProperty(ref _voiceStateText, value); }
 
@@ -243,6 +372,9 @@ namespace AIGeekTuner.ViewModels
 
             // V2-M4.2：录制结束后的独立 Windows 证据采集阶段（Recorder 本身不碰事件日志）。
             await CaptureIncidentsAsync(session).ConfigureAwait(true);
+
+            // V2-M4.4：采集结束后展示本次会话的事件证据（AI 未运行 → 暂无 AI 标记）。
+            LoadIncidentEvidence(session.Id);
         }
 
         /// <summary>
@@ -260,6 +392,127 @@ namespace AIGeekTuner.ViewModels
             {
                 Services.Diagnostics.ExceptionLogWriter.Write(exception, "Session incidents capture");
             }
+        }
+
+        /// <summary>
+        /// Gate C/L：只读载入已持久化的 incidents.json（绝不重新查询事件日志）。
+        /// 旧 Session 无文件是合法状态（NotCaptured，不报错）；损坏文件 Load 返回 null
+        /// → 同 NotCaptured，绝不影响会话本体展示。UI display cap 50 只影响展示。
+        /// </summary>
+        private void LoadIncidentEvidence(string sessionId)
+        {
+            IncidentRows.Clear();
+            _incidentEvidenceLookup.Clear();
+            HasIncidentRows = false;
+            HasIncidentOverflow = false;
+            HasIncidentQualityText = false;
+            IncidentQualityText = string.Empty;
+            IncidentOverflowText = string.Empty;
+            IncidentHeaderText = "Windows 事件证据";
+
+            var envelope = _incidentStore.Load(sessionId);
+            if (envelope is null)
+            {
+                IncidentStateText = "未采集 Windows 事件证据";
+                HasIncidentStateText = true;
+                return;
+            }
+
+            if (envelope.QueryStatus != IncidentQueryStatus.Success)
+            {
+                // Gate C：查询失败状态是 data-quality information，不弹 MessageBox；
+                // 空列表与非空列表都要能看到该提示。
+                IncidentQualityText = envelope.QueryStatus switch
+                {
+                    IncidentQueryStatus.Partial => "部分事件日志不可用",
+                    IncidentQueryStatus.PermissionDenied => "没有读取事件日志的权限",
+                    IncidentQueryStatus.Unavailable => "事件日志在本机不可用",
+                    _ => "事件日志查询失败",
+                };
+                HasIncidentQualityText = true;
+            }
+
+            if (envelope.Incidents.Count == 0)
+            {
+                // 与“未采集”必须区分：采集过，但窗口内没有已识别事件。
+                IncidentStateText = "本次关联窗口内未发现已识别的 Windows 事件";
+                HasIncidentStateText = true;
+                return;
+            }
+
+            HasIncidentStateText = false;
+            IncidentStateText = string.Empty;
+            IncidentHeaderText = $"Windows 事件证据 · {envelope.Incidents.Count} 条";
+
+            foreach (var incident in envelope.Incidents.Take(IncidentDisplayCap))
+            {
+                IncidentRows.Add(new SessionIncidentRow(incident, isInAiContext: false));
+            }
+
+            HasIncidentRows = IncidentRows.Count > 0;
+            if (envelope.Incidents.Count > IncidentDisplayCap)
+            {
+                IncidentOverflowText = $"已显示前 {IncidentDisplayCap} 条，共 {envelope.Incidents.Count} 条";
+                HasIncidentOverflow = true;
+            }
+
+            foreach (var incident in envelope.Incidents)
+            {
+                _incidentEvidenceLookup[incident.EvidenceId] =
+                    incident.OccurredAtUtc.ToLocalTime().ToString("HH:mm:ss", CultureInfo.InvariantCulture)
+                    + " · " + SessionIncidentRow.CategoryDisplayName(incident.Category)
+                    + " · " + incident.ProviderName + " Event " + incident.EventId;
+            }
+        }
+
+        /// <summary>Gate H：从 analysis ContextJson（组合上下文）解析真正进入 AI 的 incident EvidenceId。</summary>
+        private void RefreshIncidentAiMarkers(string? contextJson)
+        {
+            HashSet<string> included;
+            try
+            {
+                included = ParseAiIncidentIds(contextJson);
+            }
+            catch (Exception)
+            {
+                // ContextJson 异常时宁可没有标记，也不让展示崩掉。
+                included = new HashSet<string>(StringComparer.Ordinal);
+            }
+
+            foreach (var row in IncidentRows)
+            {
+                row.SetAiContext(included.Contains(row.EvidenceId));
+            }
+        }
+
+        private static HashSet<string> ParseAiIncidentIds(string? contextJson)
+        {
+            var result = new HashSet<string>(StringComparer.Ordinal);
+            if (string.IsNullOrWhiteSpace(contextJson))
+            {
+                return result;
+            }
+
+            using var document = JsonDocument.Parse(contextJson);
+            if (!document.RootElement.TryGetProperty("WindowsIncidents", out var incidentsElement)
+                || incidentsElement.ValueKind != JsonValueKind.Object
+                || !incidentsElement.TryGetProperty("Incidents", out var listElement)
+                || listElement.ValueKind != JsonValueKind.Array)
+            {
+                return result;
+            }
+
+            foreach (var item in listElement.EnumerateArray())
+            {
+                if (item.TryGetProperty("EvidenceId", out var idElement)
+                    && idElement.ValueKind == JsonValueKind.String
+                    && idElement.GetString() is { } id)
+                {
+                    result.Add(id);
+                }
+            }
+
+            return result;
         }
 
         /// <summary>由页面定时器驱动；只读最新状态并更新少量行（§45）。</summary>
@@ -345,6 +598,9 @@ namespace AIGeekTuner.ViewModels
 
             BuildSummary(full);
             HasResult = true;
+
+            // V2-M4.4：只读载入已持久化的 Windows 事件证据（旧 Session 无文件 → NotCaptured）。
+            LoadIncidentEvidence(full.Id);
 
             // Gate 0.3：analysis.json 存在则恢复 AI 区；损坏文件 Load 返回 null，
             // 不影响会话本体加载（session.json 始终是独立事实源）。
@@ -567,9 +823,18 @@ namespace AIGeekTuner.ViewModels
                     AnalysisError = "分析结果已生成，但保存 analysis.json 失败。";
                 }
             }
+
+            // Gate H：ContextJson 记录了 AI 实际看到的组合上下文——
+            // 据此标记哪些 incident 真正进入了 AI 分析（omitted 的不标）。
+            RefreshIncidentAiMarkers(contextJson);
         }
 
-        internal static string DescribeEvidence(string evidenceId)
+        /// <summary>
+        /// 证据 ID 映射为可读文本（§30 + Gate I）：
+        /// incident:XXXX → "HH:mm:ss · 类别 · Provider Event N"；找不到时明确回退，
+        /// 绝不把未知 ID 当成事件内容展示，也绝不直接向用户显示原始 ID。
+        /// </summary>
+        public string DescribeEvidence(string evidenceId)
         {
             if (evidenceId.StartsWith("stat:", StringComparison.Ordinal))
             {
@@ -581,6 +846,13 @@ namespace AIGeekTuner.ViewModels
             if (evidenceId.StartsWith("event:", StringComparison.Ordinal))
             {
                 return "关键事件 " + evidenceId["event:".Length..].TrimStart('0');
+            }
+
+            if (evidenceId.StartsWith("incident:", StringComparison.Ordinal))
+            {
+                return _incidentEvidenceLookup.TryGetValue(evidenceId, out var text)
+                    ? text
+                    : "Windows 事件证据不可用";
             }
 
             return evidenceId;

@@ -30,6 +30,8 @@ public class PageConstructionSmokeTests
                 AIGeekTuner.Views.ResultPage result = new();
                 AIGeekTuner.Views.DiagnosisHistoryPage history = new();
                 AIGeekTuner.Views.SettingsPage settings = new();
+                // V2-M4.4：SessionsPage 新增事件证据卡，纳入 XAML 解析冒烟。
+                AIGeekTuner.Views.SessionsPage sessions = new();
 
                 Assert.NotNull(dashboard);
                 Assert.NotNull(hardware);
@@ -37,6 +39,7 @@ public class PageConstructionSmokeTests
                 Assert.NotNull(result);
                 Assert.NotNull(history);
                 Assert.NotNull(settings);
+                Assert.NotNull(sessions);
             }
             catch (Exception exception)
             {

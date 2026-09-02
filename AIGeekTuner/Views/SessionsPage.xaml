@@ -87,9 +87,92 @@
                 <TextBlock Text="{Binding ErrorText}" Foreground="#FFD1D1" FontSize="11" TextWrapping="Wrap"/>
             </Border>
 
-            <!-- 摘要 -->
+            <!-- 摘要：遥测确定性事实 → Windows 事件证据 → AI 分析 → 语音摘要（V2-M4.4 顺序） -->
             <StackPanel Grid.Row="4"
                         Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="Session Summary · 统计" Style="{StaticResource SectionTitleStyle}"/>
+                        <TextBlock Text="确定性统计分析；变化检测 ≠ 硬件故障判定。Coverage = 出现该指标的采样占比。"
+                                   Foreground="#A9D9E9" FontSize="11" Margin="0,4,0,8"/>
+                        <ListView ItemsSource="{Binding Statistics}" Background="Transparent"
+                                  BorderThickness="0" MaxHeight="260">
+                            <ListView.View>
+                                <GridView>
+                                    <GridViewColumn Header="设备" DisplayMemberBinding="{Binding Device}" Width="230"/>
+                                    <GridViewColumn Header="指标" DisplayMemberBinding="{Binding Metric}" Width="110"/>
+                                    <GridViewColumn Header="样本" DisplayMemberBinding="{Binding Samples}" Width="60"/>
+                                    <GridViewColumn Header="覆盖" DisplayMemberBinding="{Binding Coverage}" Width="64"/>
+                                    <GridViewColumn Header="Min" DisplayMemberBinding="{Binding Min}" Width="80"/>
+                                    <GridViewColumn Header="Avg" DisplayMemberBinding="{Binding Avg}" Width="80"/>
+                                    <GridViewColumn Header="Max" DisplayMemberBinding="{Binding Max}" Width="80"/>
+                                    <GridViewColumn Header="P95" DisplayMemberBinding="{Binding P95}" Width="80"/>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+                    </StackPanel>
+                </Border>
+
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="关键变化" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,6"/>
+                        <ItemsControl ItemsSource="{Binding Events}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,3">
+                                        <TextBlock Text="{Binding TimeText}" Foreground="#9FC6DA" FontSize="11"/>
+                                        <TextBlock Text="{Binding Headline}" Foreground="#ECFAFF" FontSize="11"
+                                                   FontWeight="SemiBold" Margin="12,0,0,0"/>
+                                        <TextBlock Text="{Binding Detail}" Foreground="#A9D9E9" FontSize="10"
+                                                   Margin="10,0,0,0"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+
+                <!-- V2-M4.4：Windows 事件证据（关联事件，不做因果判断） -->
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,6">
+                            <TextBlock Text="{Binding IncidentHeaderText}" Style="{StaticResource SectionTitleStyle}"/>
+                            <TextBlock Text="{Binding IncidentQualityText}" Foreground="#FFE08A" FontSize="10"
+                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Visibility="{Binding HasIncidentQualityText, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                        <TextBlock Text="{Binding IncidentStateText}" Foreground="#A9D9E9" FontSize="11" Margin="0,2,0,0"
+                                   Visibility="{Binding HasIncidentStateText, Converter={StaticResource BoolToVis}}"/>
+                        <ItemsControl ItemsSource="{Binding IncidentRows}"
+                                      Visibility="{Binding HasIncidentRows, Converter={StaticResource BoolToVis}}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" Margin="0,3" ToolTip="{Binding RowToolTip}">
+                                        <Ellipse Width="7" Height="7" VerticalAlignment="Center"
+                                                 Fill="{Binding SeverityBrush}" ToolTip="{Binding SeverityToolTip}"/>
+                                        <TextBlock Text="{Binding OccurredAtLocal}" Foreground="#9FC6DA" FontSize="11"
+                                                   Margin="10,0,0,0" Width="58"/>
+                                        <TextBlock Text="{Binding CategoryDisplay}" Foreground="#ECFAFF" FontSize="11"
+                                                   FontWeight="SemiBold" Width="120"/>
+                                        <TextBlock Text="{Binding Summary}" Foreground="#ECFAFF" FontSize="11"
+                                                   Margin="4,0,0,0" MaxWidth="430" TextAlignment="Left"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding ProviderEventText}" Foreground="#7FB6CB" FontSize="10"
+                                                   Margin="12,0,0,0" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding AiMarkerText}" Foreground="#7FB6CB" FontSize="9"
+                                                   Margin="10,0,0,0" VerticalAlignment="Center"
+                                                   ToolTip="该事件已包含在本次 AI 分析的上下文中"
+                                                   Visibility="{Binding HasAiMarker, Converter={StaticResource BoolToVis}}"/>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <TextBlock Text="{Binding IncidentOverflowText}" Foreground="#A9D9E9" FontSize="10" Margin="0,6,0,0"
+                                   Visibility="{Binding HasIncidentOverflow, Converter={StaticResource BoolToVis}}"/>
+                        <TextBlock Text="时间上的同时发生不代表因果关系。" Foreground="#6FA7BC" FontSize="10" Margin="0,8,0,0"/>
+                    </StackPanel>
+                </Border>
+
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
                         <Grid Margin="0,0,0,6">
@@ -165,48 +248,6 @@
                                 Style="{StaticResource SecondaryButtonStyle}" Padding="14,6"
                                 HorizontalAlignment="Left"/>
                         <TextBlock Text="{Binding VoiceStateText}" Foreground="#A9D9E9" FontSize="10" Margin="0,6,0,0"/>
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Text="Session Summary · 统计" Style="{StaticResource SectionTitleStyle}"/>
-                        <TextBlock Text="确定性统计分析；变化检测 ≠ 硬件故障判定。Coverage = 出现该指标的采样占比。"
-                                   Foreground="#A9D9E9" FontSize="11" Margin="0,4,0,8"/>
-                        <ListView ItemsSource="{Binding Statistics}" Background="Transparent"
-                                  BorderThickness="0" MaxHeight="260">
-                            <ListView.View>
-                                <GridView>
-                                    <GridViewColumn Header="设备" DisplayMemberBinding="{Binding Device}" Width="230"/>
-                                    <GridViewColumn Header="指标" DisplayMemberBinding="{Binding Metric}" Width="110"/>
-                                    <GridViewColumn Header="样本" DisplayMemberBinding="{Binding Samples}" Width="60"/>
-                                    <GridViewColumn Header="覆盖" DisplayMemberBinding="{Binding Coverage}" Width="64"/>
-                                    <GridViewColumn Header="Min" DisplayMemberBinding="{Binding Min}" Width="80"/>
-                                    <GridViewColumn Header="Avg" DisplayMemberBinding="{Binding Avg}" Width="80"/>
-                                    <GridViewColumn Header="Max" DisplayMemberBinding="{Binding Max}" Width="80"/>
-                                    <GridViewColumn Header="P95" DisplayMemberBinding="{Binding P95}" Width="80"/>
-                                </GridView>
-                            </ListView.View>
-                        </ListView>
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Text="关键变化" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,6"/>
-                        <ItemsControl ItemsSource="{Binding Events}">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal" Margin="0,3">
-                                        <TextBlock Text="{Binding TimeText}" Foreground="#9FC6DA" FontSize="11"/>
-                                        <TextBlock Text="{Binding Headline}" Foreground="#ECFAFF" FontSize="11"
-                                                   FontWeight="SemiBold" Margin="12,0,0,0"/>
-                                        <TextBlock Text="{Binding Detail}" Foreground="#A9D9E9" FontSize="10"
-                                                   Margin="10,0,0,0"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
                     </StackPanel>
                 </Border>
 
