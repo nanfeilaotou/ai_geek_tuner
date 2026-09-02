@@ -8,6 +8,7 @@ using AIGeekTuner.Services.Diagnosis;
 using AIGeekTuner.Services.Dialogs;
 using AIGeekTuner.Services.Files;
 using AIGeekTuner.Services.Hardware;
+using AIGeekTuner.Services.Hardware.Inventory;
 using AIGeekTuner.Services.History;
 using AIGeekTuner.Services.Incidents;
 using AIGeekTuner.Services.Navigation;
@@ -57,12 +58,24 @@ namespace AIGeekTuner
         /// <summary>运行时配置中心；设置页保存后整体换入新快照。</summary>
         internal DiagnosticConfigurationStore ConfigurationStore { get; }
 
+        /// <summary>
+        /// V2-M4.5A：静态硬件 Inventory 数据底座（不依赖 AIDA64/HWiNFO/LHM）。
+        /// 本轮只提供能力不接 UI；后续 Hardware 详情页消费。
+        /// </summary>
+        internal IHardwareInventoryService HardwareInventory { get; }
+
         public MainWindow()
         {
             InitializeComponent();
 
             var applicationDataPaths = ApplicationDataPaths.Default;
             _httpClient = new HttpClient();
+            HardwareInventory = new HardwareInventoryService(
+                new WmiInventorySource(),
+                new DxgiAdapterSource(),
+                new CoreAudioEndpointSource(),
+                new GdiDisplayModeSource(),
+                new WindowsNetworkAdapterSource());
             _filePickerService = new OpenFileDialogService();
             _fileReaderService = new FileReaderService();
             _confirmationDialogService = new MessageBoxConfirmationDialogService();
