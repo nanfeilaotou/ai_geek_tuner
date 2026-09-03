@@ -24,6 +24,10 @@ namespace AIGeekTuner.Services.Storage
             ReportsDirectory = Path.Combine(RootDirectory, "Reports");
             SettingsDirectory = Path.Combine(RootDirectory, "Settings");
             SettingsFilePath = Path.Combine(SettingsDirectory, "settings.json");
+            // M5.0 Provider foundation 的独立存储：Provider 配置与 DPAPI 凭据各一个文件，
+            // 与旧 settings.json 完全隔离，保证迁移是纯 additive 的。
+            AiProvidersFilePath = Path.Combine(SettingsDirectory, "ai-providers.json");
+            AiCredentialsFilePath = Path.Combine(SettingsDirectory, "credentials.json");
             LogsDirectory = Path.Combine(RootDirectory, "Logs");
             SessionsDirectory = Path.Combine(RootDirectory, "Sessions");
 
@@ -75,6 +79,12 @@ namespace AIGeekTuner.Services.Storage
         public string SettingsDirectory { get; }
 
         public string SettingsFilePath { get; }
+
+        /// <summary>Provider 配置文件（M5.0 foundation，独立于 settings.json）。</summary>
+        public string AiProvidersFilePath { get; }
+
+        /// <summary>DPAPI 加密的凭据文件（只存 providerId + 受保护 blob）。</summary>
+        public string AiCredentialsFilePath { get; }
 
         public string LogsDirectory { get; }
 
