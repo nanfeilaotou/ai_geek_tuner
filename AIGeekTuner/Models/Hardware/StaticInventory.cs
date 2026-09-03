@@ -43,7 +43,9 @@ namespace AIGeekTuner.Models.Hardware.Inventory
         DateTimeOffset CollectedAtUtc,
         // V2-M4.5B：hardware audio controller supplement（Win32_SoundDevice）。
         // CoreAudio endpoints 是端点不是硬件；Dashboard/详情页优先展示硬件控制器。
-        IReadOnlyList<AudioControllerInfo>? AudioControllers = null);
+        IReadOnlyList<AudioControllerInfo>? AudioControllers = null,
+        // V2-M4.5C.1 Gate I：电池（Win32_Battery + root\WMI Battery*，无电池为 null）。
+        BatteryInfo? Battery = null);
 
     public sealed record CpuInventoryInfo(
         string? Name,
@@ -93,7 +95,10 @@ namespace AIGeekTuner.Models.Hardware.Inventory
         string? FormFactor,
         uint? DataWidthBits,
         uint? TotalWidthBits,
-        InventorySource Source);
+        InventorySource Source,
+        // V2-M4.5C：SMBIOSMemoryType（SMBIOS 官方编码，34=DDR5/26=DDR4/24=DDR3）。
+        // Win32_PhysicalMemory.MemoryType 遗留字段不可靠（真机返回 0），不使用。
+        uint? SmbiosMemoryType = null);
 
     public sealed record GpuInventoryInfo(
         string? Name,
@@ -113,6 +118,26 @@ namespace AIGeekTuner.Models.Hardware.Inventory
         string? Label,
         ulong? SizeBytes,
         ulong? FreeSpaceBytes);
+
+    /// <summary>
+    /// V2-M4.5C.1 Gate I：电池信息（容量单位 mWh，电压 mV，与 WMI 原始口径一致）。
+    /// 缺失来源一律 null；Health/Wear 只有设计+满充都 &gt; 0 才有值。
+    /// </summary>
+    public sealed record BatteryInfo(
+        string? Name,
+        bool PowerOnline,
+        bool Charging,
+        bool Discharging,
+        uint? ChargePercent,
+        uint? DesignCapacityMWh,
+        uint? FullChargeCapacityMWh,
+        uint? RemainingCapacityMWh,
+        uint? VoltageMillivolts,
+        uint? ChargeRateMilliwatts,
+        uint? DischargeRateMilliwatts,
+        double? HealthPercent,
+        double? WearPercent,
+        InventorySource Source);
 
     public sealed record StorageDiskInventoryInfo(
         string? Model,

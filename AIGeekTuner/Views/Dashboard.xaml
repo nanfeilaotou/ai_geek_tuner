@@ -38,10 +38,10 @@
                 </Border>
                 <Border Grid.Column="2" Style="{StaticResource ToolCardStyle}">
                     <StackPanel>
-                        <TextBlock Text="运行状态" Style="{StaticResource InfoLabelStyle}"/>
-                        <TextBlock Text="{Binding Hardware.RuntimeStatus}" Style="{StaticResource InfoValueStyle}"
+                        <TextBlock Text="运行时间" Style="{StaticResource InfoLabelStyle}"/>
+                        <TextBlock Text="{Binding Hardware.UptimeDisplay}" Style="{StaticResource InfoValueStyle}"
                                    FontSize="15" Margin="0,8,0,0"/>
-                        <TextBlock Text="{Binding Hardware.DetectedAt}" Foreground="{DynamicResource MutedTextBrush}"
+                        <TextBlock Text="{Binding Hardware.LastBootDisplay}" Foreground="{DynamicResource MutedTextBrush}"
                                    FontSize="11" Margin="0,5,0,0"/>
                     </StackPanel>
                 </Border>

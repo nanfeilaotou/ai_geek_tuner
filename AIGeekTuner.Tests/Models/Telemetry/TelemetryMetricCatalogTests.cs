@@ -6,10 +6,11 @@ namespace AIGeekTuner.Tests.Models.Telemetry
     public class TelemetryMetricCatalogTests
     {
         [Fact]
-        public void Catalog_ContainsExactlySeventeenMetrics()
+        public void Catalog_ContainsExactlyEighteenMetrics()
         {
-            // V2-M4.5B：+ memory.module.temperature（per-DIMM 温度）→ 17。
-            Assert.Equal(17, TelemetryMetricCatalog.All.Count);
+            // V2-M4.5B：+ memory.module.temperature → 17。
+            // V2-M4.5C Gate F：+ gpu.memory.clock（显存频率 numeric）→ 18。
+            Assert.Equal(18, TelemetryMetricCatalog.All.Count);
         }
 
         [Fact]

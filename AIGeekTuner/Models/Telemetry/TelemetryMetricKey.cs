@@ -18,6 +18,7 @@ namespace AIGeekTuner.Models.Telemetry
         public static readonly TelemetryMetricKey GpuBoardPower = new("gpu.board.power");
         public static readonly TelemetryMetricKey GpuCoreUtilization = new("gpu.core.utilization");
         public static readonly TelemetryMetricKey GpuCoreClock = new("gpu.core.clock");
+        public static readonly TelemetryMetricKey GpuMemoryClock = new("gpu.memory.clock");
         public static readonly TelemetryMetricKey GpuMemoryUsed = new("gpu.memory.used");
 
         public static readonly TelemetryMetricKey MemoryUsed = new("memory.used");

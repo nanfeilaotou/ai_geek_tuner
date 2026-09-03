@@ -47,13 +47,16 @@ namespace AIGeekTuner.Services.Hardware.Inventory
                     logicalCores = (logicalCores ?? 0) + logical.Value;
                 }
 
+                // V2-M4.5C Gate A 审计：Win32_Processor.MaxClockSpeed 实际语义是
+                // 额定（base）时钟——真机 i9-13980HX 报 2200（Turbo 5.8GHz 不在此），
+                // 因此只能作为“基准频率”来源；Turbo max 无可靠 WMI 来源，不产出。
+                // CurrentClockSpeed 是当前运行频率（随负载波动），绝不当 base 用。
                 var clock = row.UInt32("MaxClockSpeed");
-                if (clock.HasValue && (!maxClock.HasValue || clock.Value > maxClock.Value))
+                if (clock.HasValue && (!baseClock.HasValue || clock.Value > baseClock.Value))
                 {
-                    maxClock = clock.Value;
+                    baseClock = clock.Value;
                 }
 
-                baseClock ??= row.UInt32("CurrentClockSpeed");
                 virtualization ??= row.Boolean("VirtualizationFirmwareEnabled");
             }
 

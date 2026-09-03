@@ -7,6 +7,7 @@ using AIGeekTuner.Services.Hardware;
 using AIGeekTuner.Services.Hardware.Inventory;
 using AIGeekTuner.Services.Hardware.Inventory.Presentation;
 using AIGeekTuner.Services.Telemetry;
+using AIGeekTuner.Services.Telemetry.Presentation;
 using AIGeekTuner.Services.Telemetry.Recording;
 
 namespace AIGeekTuner.ViewModels
@@ -16,10 +17,12 @@ namespace AIGeekTuner.ViewModels
         private readonly IHardwareDetectionService _hardwareDetectionService;
         private readonly IHardwareSensorService _hardwareSensorService;
         private readonly IHardwareInventoryService? _hardwareInventoryService;
+        private readonly LiveMetricRangeTracker _rangeTracker = new();
         private readonly ITelemetryHub? _telemetryHub;
         private readonly ILiveTelemetrySource? _liveSource;
-        private readonly TelemetryTrendBuffer _trendBuffer = new(TimeSpan.FromMinutes(2));
         private readonly AsyncRelayCommand _refreshSensorsCommand;
+        private readonly RelayCommand _resetRangesCommand;
+        private IReadOnlyList<Models.Hardware.Inventory.MemoryModuleInfo> _inventoryMemoryModules = [];
 
         private string _deviceModel = "正在读取...";
         private string _systemSummary = "正在读取...";
@@ -43,6 +46,8 @@ namespace AIGeekTuner.ViewModels
         private string _operatingSystemVersion = NotDetectedDisplay;
         private string _operatingSystemArchitecture = NotDetectedDisplay;
         private string _detectedAt = "--";
+        private string _uptimeDisplay = "--";
+        private string _lastBootDisplay = "--";
         private string _sensorStatus = "等待读取实时传感器";
         private string _sensorCapturedAt = "--";
         private bool _isLoading = true;
@@ -51,8 +56,9 @@ namespace AIGeekTuner.ViewModels
         private bool _hasSensorData;
         private bool _hasInitializedSensors;
         private bool _hasDataSources;
-        private bool _hasCoreMetrics;
-        private bool _hasTrends;
+        private bool _hasLiveCards;
+        private bool _hasDashboardDetails;
+        private bool _hasInventoryDetail;
         private string _autoRefreshSummary = "自动刷新已关闭";
         private IReadOnlyList<TelemetryDebugRow> _lastDebugRows = [];
 
@@ -69,14 +75,17 @@ namespace AIGeekTuner.ViewModels
                 ?? throw new ArgumentNullException(nameof(hardwareSensorService));
             _hardwareInventoryService = hardwareInventoryService;
             _telemetryHub = telemetryHub;
+            _resetRangesCommand = new RelayCommand(
+                () => _rangeTracker.Reset(),
+                () => HasLiveCards);
             if (liveTelemetrySource is not null)
             {
                 _liveSource = liveTelemetrySource;
                 _liveSource.SnapshotUpdated += s =>
                 {
-                    // 事件契约：后台线程触发（§15）。趋势缓冲自身线程安全，
+                    // 事件契约：后台线程触发（§15）。范围跟踪自身线程安全，
                     // 可即时记录；显示更新必须调度回 UI 线程改 ObservableCollection。
-                    _trendBuffer.AddSnapshot(s);
+                    _rangeTracker.Update(s);
                     var dispatcher = System.Windows.Application.Current?.Dispatcher;
                     if (dispatcher is null || dispatcher.CheckAccess())
                     {
@@ -117,6 +126,12 @@ namespace AIGeekTuner.ViewModels
         public string OperatingSystemVersion { get => _operatingSystemVersion; private set => SetProperty(ref _operatingSystemVersion, value); }
         public string OperatingSystemArchitecture { get => _operatingSystemArchitecture; private set => SetProperty(ref _operatingSystemArchitecture, value); }
         public string DetectedAt { get => _detectedAt; private set => SetProperty(ref _detectedAt, value); }
+
+        /// <summary>V2-M4.5C Gate B：顶部第三卡 = 运行时间（来自 OS LastBoot）。</summary>
+        public string UptimeDisplay { get => _uptimeDisplay; private set => SetProperty(ref _uptimeDisplay, value); }
+
+        /// <summary>次级行：最近启动时间（yyyy-MM-dd HH:mm）。</summary>
+        public string LastBootDisplay { get => _lastBootDisplay; private set => SetProperty(ref _lastBootDisplay, value); }
         public string SensorStatus { get => _sensorStatus; private set => SetProperty(ref _sensorStatus, value); }
         public string SensorCapturedAt { get => _sensorCapturedAt; private set => SetProperty(ref _sensorCapturedAt, value); }
         public bool IsLoading { get => _isLoading; private set => SetProperty(ref _isLoading, value); }
@@ -152,24 +167,30 @@ namespace AIGeekTuner.ViewModels
         public ObservableCollection<InventoryDisplayRowViewModel> DashboardDetailRows { get; } = [];
 
         /// <summary>Dashboard 详情行已装配（inventory 可用）。</summary>
-        public bool HasDashboardDetails { get; private set; }
+        public bool HasDashboardDetails
+        {
+            get => _hasDashboardDetails;
+            private set => SetProperty(ref _hasDashboardDetails, value);
+        }
 
         /// <summary>V2-M4.5B Gate B：Hardware 详情页左侧静态 Inventory 分区。</summary>
         public ObservableCollection<InventoryDisplaySectionViewModel> InventorySections { get; } = [];
 
         /// <summary>静态 Inventory 详情可用（ legacy 分组收起）。</summary>
-        public bool HasInventoryDetail { get; private set; }
+        public bool HasInventoryDetail
+        {
+            get => _hasInventoryDetail;
+            private set => SetProperty(ref _hasInventoryDetail, value);
+        }
 
         public ObservableCollection<HardwareSensorGroupViewModel> SensorGroups { get; } = [];
 
         /// <summary>V2-M1：统一遥测数据源状态（紧凑区）。</summary>
         public ObservableCollection<TelemetrySourceStatusViewModel> DataSources { get; } = [];
 
-        /// <summary>V2-M1：canonical 核心指标分组展示。</summary>
-        public ObservableCollection<HardwareSensorGroupViewModel> CoreMetricGroups { get; } = [];
 
-        /// <summary>V2-M3.2：最近 2 分钟 canonical 趋势行（Sparkline 渲染）。</summary>
-        public ObservableCollection<TrendMetricRow> TrendRows { get; } = [];
+        /// <summary>V2-M4.5C Gate F：右侧实时设备卡（Meter + Current/Low/High）。</summary>
+        public ObservableCollection<LiveDeviceCardViewModel> LiveCards { get; } = [];
 
         /// <summary>V2-M1.1：最近一次快照的 Raw 明细（数据源详情对话框用，§25）。</summary>
         public IReadOnlyList<TelemetryDebugRow> LastDebugRows
@@ -187,18 +208,23 @@ namespace AIGeekTuner.ViewModels
             private set => SetProperty(ref _hasDataSources, value);
         }
 
-        public bool HasCoreMetrics
+
+        /// <summary>实时设备卡有数据时为 true。</summary>
+        public bool HasLiveCards
         {
-            get => _hasCoreMetrics;
-            private set => SetProperty(ref _hasCoreMetrics, value);
+            get => _hasLiveCards;
+            private set
+            {
+                if (SetProperty(ref _hasLiveCards, value))
+                {
+                    _resetRangesCommand.NotifyCanExecuteChanged();
+                }
+            }
         }
 
-        /// <summary>趋势区有数据时为 true（Sparkline 区可见性）。</summary>
-        public bool HasTrends
-        {
-            get => _hasTrends;
-            private set => SetProperty(ref _hasTrends, value);
-        }
+        /// <summary>Gate D/G：“重置范围”——清空本次监测期间观察到的 Low/High，
+        /// 下一 snapshot 从当前值重新开始。</summary>
+        public RelayCommand ResetRangesCommand => _resetRangesCommand;
 
         public AsyncRelayCommand RefreshSensorsCommand =>
             _refreshSensorsCommand;
@@ -211,6 +237,8 @@ namespace AIGeekTuner.ViewModels
             }
 
             _hasInitializedSensors = true;
+            // Gate D：Hardware 实时监测开始 → 范围从零开始观察。
+            _rangeTracker.Reset();
             await RefreshSensorsAsync();
         }
 
@@ -280,9 +308,7 @@ namespace AIGeekTuner.ViewModels
                 // Hub 契约上不抛业务异常；此处仅为防御性兜底，
                 // 绝不清空 V1 SensorGroups 的既有展示。
                 DataSources.Clear();
-                CoreMetricGroups.Clear();
                 HasDataSources = false;
-                HasCoreMetrics = false;
             }
         }
 
@@ -296,27 +322,8 @@ namespace AIGeekTuner.ViewModels
 
             HasDataSources = DataSources.Count > 0;
 
-            // V2-M3.3：普通页面装配收敛到 HardwarePageViewBuilder——
-            // 显示策略（resolved/真实名）+ 核心指标闭集 + 存储名 resolver。
-            // 匿名占位设备仍完整保留在 Raw 明细（数据源详情对话框）。
-            CoreMetricGroups.Clear();
-            var cards = HardwarePageViewBuilder.BuildCards(
-                snapshot,
-                MetricLabel,
-                FormatMetricValue,
-                TelemetrySourceStatusViewModel.SourceDisplayName);
-            foreach (var card in cards)
-            {
-                CoreMetricGroups.Add(new HardwareSensorGroupViewModel(
-                    card.Title,
-                    card.Rows
-                        .Select(row => new HardwareSensorItemViewModel(
-                            row.Label, row.ValueText, row.SourceDisplay))
-                        .ToArray()));
-            }
-
-            HasCoreMetrics = CoreMetricGroups.Count > 0;
-
+            // V2-M4.5C.1 Gate B：旧“实时数据 · 核心指标”卡列表已随 UI 移除，
+            // 与实时设备卡（LiveCards）完全重复；canonical 数据与 Raw 明细不变。
             AutoRefreshSummary = _liveSource is { IsRunning: true } live
                 ? $"自动刷新 · {(live.IntervalMs >= 1000 ? $"{live.IntervalMs / 1000d:0.#} 秒" : $"{live.IntervalMs} ms")}"
                 : "自动刷新已关闭";
@@ -349,29 +356,45 @@ namespace AIGeekTuner.ViewModels
                 .Where(report => report.SourceVersion is not null)
                 .Select(report => $"{TelemetrySourceStatusViewModel.SourceDisplayName(report.Source)} {report.SourceVersion}"));
 
-            RebuildTrendRows(snapshot);
+            // V2-M4.5C Gate F：右侧实时区 = Meter + Current/Low/High 设备卡。
+            RebuildLiveCards(snapshot);
         }
 
         /// <summary>
-        /// V2-M3.3：趋势装配收敛到 HardwarePageViewBuilder（§7 默认核心趋势
-        /// 闭集，策略驱动而非“有数据就画”），来源切换不断线（§37）。
+        /// V2-M4.5C Gate F：实时设备卡装配收敛到 HardwareLiveViewBuilder；
+        /// Low/High 来自 <see cref="_rangeTracker"/>（来源无关，来源 fallback 不断线）。
         /// </summary>
-        private void RebuildTrendRows(TelemetrySnapshot snapshot)
+        private void RebuildLiveCards(TelemetrySnapshot snapshot)
         {
-            var rows = HardwarePageViewBuilder.BuildTrends(
-                snapshot,
-                _trendBuffer,
-                MetricLabel,
-                FormatMetricValue);
+            var cards = HardwareLiveViewBuilder.Build(snapshot, _rangeTracker, _inventoryMemoryModules);
 
-            TrendRows.Clear();
-            foreach (var row in rows)
+            LiveCards.Clear();
+            foreach (var card in cards)
             {
-                TrendRows.Add(new TrendMetricRow(
-                    row.Label, row.Current, row.Min, row.Max, row.Points, row.FullName));
+                LiveCards.Add(new LiveDeviceCardViewModel(
+                    card.Title,
+                    card.Meters.Select(meter => new LiveMeterLineViewModel(
+                        meter.Label,
+                        meter.Current,
+                        meter.Low,
+                        meter.High,
+                        meter.ScaleMin,
+                        meter.ScaleMax,
+                        HardwareLiveViewBuilder.FormatValue(meter.Current, meter.Unit),
+                        HardwareLiveViewBuilder.FormatValue(meter.Low ?? meter.Current, meter.Unit),
+                        HardwareLiveViewBuilder.FormatValue(meter.High ?? meter.Current, meter.Unit)))
+                        .ToArray(),
+                    card.Numerics.Select(numeric => new LiveNumericLineViewModel(
+                        numeric.Label,
+                        numeric.Current,
+                        numeric.Low,
+                        numeric.High))
+                        .ToArray(),
+                    card.SubLines.Select(subLine => subLine.Text)
+                        .ToArray()));
             }
 
-            HasTrends = TrendRows.Count > 0;
+            HasLiveCards = LiveCards.Count > 0;
         }
 
         private static string? MetricLabel(TelemetryMetricKey metric) =>
@@ -388,6 +411,7 @@ namespace AIGeekTuner.ViewModels
                 "gpu.board.power" => "功耗",
                 "gpu.core.utilization" => "使用率",
                 "gpu.core.clock" => "核心频率",
+                "gpu.memory.clock" => "显存频率",
                 "gpu.memory.used" => "已用显存",
                 "memory.used" => "已用内存",
                 "memory.utilization" => "使用率",
@@ -433,18 +457,30 @@ namespace AIGeekTuner.ViewModels
 
         private void ApplyInventory(HardwareInventorySnapshot snapshot)
         {
-            DashboardDetailRows.Clear();
-            foreach (var row in DashboardInventoryPresenter.BuildRows(snapshot))
+            _inventoryMemoryModules = snapshot.MemoryModules;
+
+            // Gate B：顶部第三卡改为运行时间（OS LastBoot / uptime）。
+            if (snapshot.Os?.LastBootUtc is { } lastBoot)
             {
-                DashboardDetailRows.Add(new InventoryDisplayRowViewModel(row.Label, row.Value));
+                UptimeDisplay = HardwareInventoryDetailPresenter.FormatUptime(
+                    snapshot.CollectedAtUtc - lastBoot);
+                LastBootDisplay = "最近启动 "
+                    + lastBoot.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            else
+            {
+                UptimeDisplay = "--";
+                LastBootDisplay = "--";
             }
 
-            HasDashboardDetails = DashboardDetailRows.Count > 0;
-
-            InventorySections.Clear();
-            foreach (var section in HardwareInventoryDetailPresenter.BuildSections(snapshot))
-            {
-                InventorySections.Add(new InventoryDisplaySectionViewModel(
+            // V2-M4.5C.1 Gate A：先在局部完整构建新的 presentation 视图模型，
+            // 再对 UI 集合做一次 Clear+Add 的原子切换 —— 两个 await/事件之间
+            // 绝不产生可被用户看到的中间态（legacy 行与新行并存的窗口）。
+            var dashboardRows = DashboardInventoryPresenter.BuildRows(snapshot)
+                .Select(row => new InventoryDisplayRowViewModel(row.Label, row.Value))
+                .ToArray();
+            var sections = HardwareInventoryDetailPresenter.BuildSections(snapshot)
+                .Select(section => new InventoryDisplaySectionViewModel(
                     section.Title,
                     section.Cards
                         .Select(card => new InventoryDisplayCardViewModel(
@@ -452,10 +488,24 @@ namespace AIGeekTuner.ViewModels
                             card.Rows
                                 .Select(row => new InventoryDisplayRowViewModel(row.Label, row.Value))
                                 .ToArray()))
-                        .ToArray()));
+                        .ToArray()))
+                .ToArray();
+
+            DashboardDetailRows.Clear();
+            foreach (var row in dashboardRows)
+            {
+                DashboardDetailRows.Add(row);
             }
 
-            HasInventoryDetail = InventorySections.Count > 0;
+            HasDashboardDetails = dashboardRows.Length > 0;
+
+            InventorySections.Clear();
+            foreach (var section in sections)
+            {
+                InventorySections.Add(section);
+            }
+
+            HasInventoryDetail = sections.Length > 0;
         }
 
         private void ApplyStaticHardware(HardwareInfo hardware)

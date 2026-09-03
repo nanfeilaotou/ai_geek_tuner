@@ -38,7 +38,8 @@ namespace AIGeekTuner.Services.Hardware.Inventory
                     FormFactor: MapFormFactor(row.UInt32("FormFactor")),
                     DataWidthBits: ZeroToNull(row.UInt32("DataWidth")),
                     TotalWidthBits: ZeroToNull(row.UInt32("TotalWidth")),
-                    Source: InventorySource.Wmi));
+                    Source: InventorySource.Wmi,
+                    SmbiosMemoryType: ZeroToNull(row.UInt32("SMBIOSMemoryType"))));
             }
 
             return modules;
@@ -48,6 +49,23 @@ namespace AIGeekTuner.Services.Hardware.Inventory
         {
             8 => "DIMM",
             12 => "SODIMM",
+            _ => null,
+        };
+
+        /// <summary>
+        /// V2-M4.5C：SMBIOS Memory Type 官方编码 → 用户可见代际。
+        /// 只收录可靠值；未知编码返回 null（不猜测）。
+        /// </summary>
+        public static string? MapMemoryGeneration(uint? smbiosMemoryType) => smbiosMemoryType switch
+        {
+            24 => "DDR3",
+            26 => "DDR4",
+            29 => "LPDDR3",
+            30 => "LPDDR4",
+            32 => "HBM",
+            33 => "HBM2",
+            34 => "DDR5",
+            35 => "LPDDR5",
             _ => null,
         };
 

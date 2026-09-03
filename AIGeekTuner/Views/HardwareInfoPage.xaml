@@ -72,8 +72,23 @@
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Text="{Binding Label}" Style="{StaticResource HardwareFieldLabelStyle}"/>
-                <TextBlock Grid.Column="1" Text="{Binding Value}"
-                           Style="{StaticResource HardwareFieldValueStyle}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Value}">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock" BasedOn="{StaticResource HardwareFieldValueStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsSecondary}" Value="True">
+                                    <Setter Property="Foreground" Value="#9CCFE0"/>
+                                    <Setter Property="FontSize" Value="11"/>
+                                    <Setter Property="FontWeight" Value="Normal"/>
+                                </DataTrigger>
+                                <DataTrigger Binding="{Binding Label}" Value="">
+                                    <Setter Property="Grid.Column" Value="0"/>
+                                    <Setter Property="Grid.ColumnSpan" Value="2"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
             </Grid>
         </DataTemplate>
 
@@ -147,10 +162,17 @@
                                Style="{StaticResource PageSubtitleStyle}"/>
                 </StackPanel>
                 <StackPanel Grid.Column="1" HorizontalAlignment="Right">
-                    <Button Content="{Binding RefreshSensorButtonText}"
-                            Command="{Binding RefreshSensorsCommand}"
-                            Style="{StaticResource TechButtonStyle}"
-                            Padding="18,8" MinWidth="132"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Content="重置范围"
+                                Command="{Binding ResetRangesCommand}"
+                                Style="{StaticResource TechButtonStyle}"
+                                Padding="14,8" MinWidth="96" Margin="0,0,8,0"
+                                ToolTip="清空本次实时监测期间观察到的低/高范围，下一刷新从当前值重新开始。"/>
+                        <Button Content="{Binding RefreshSensorButtonText}"
+                                Command="{Binding RefreshSensorsCommand}"
+                                Style="{StaticResource TechButtonStyle}"
+                                Padding="18,8" MinWidth="132"/>
+                    </StackPanel>
                     <TextBlock Text="{Binding AutoRefreshSummary}"
                                Foreground="#A9D9E9" FontSize="10"
                                HorizontalAlignment="Right" Margin="0,5,0,0"/>
@@ -462,7 +484,7 @@
                                             <DataTrigger Binding="{Binding IsSensorRefreshing}" Value="True">
                                                 <Setter Property="Fill" Value="#FFE08A"/>
                                             </DataTrigger>
-                                            <DataTrigger Binding="{Binding HasCoreMetrics}" Value="True">
+                                            <DataTrigger Binding="{Binding HasLiveCards}" Value="True">
                                                 <Setter Property="Fill" Value="#A9F2D0"/>
                                             </DataTrigger>
                                         </Style.Triggers>
@@ -507,65 +529,81 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- V2-M1 canonical 核心指标 -->
-                        <Border Background="#0AFFFFFF" Padding="14,12" Margin="0,0,0,9"
-                                Visibility="{Binding HasCoreMetrics, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <StackPanel>
-                                <TextBlock Text="实时数据 · 核心指标"
-                                           Foreground="#D9F7FF" FontSize="12"
-                                           FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                <ItemsControl ItemsSource="{Binding CoreMetricGroups}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type viewModels:HardwareSensorGroupViewModel}">
-                                            <Border Style="{StaticResource SensorGroupStyle}">
-                                                <StackPanel>
-                                                    <TextBlock Text="{Binding Title}" Foreground="#D9F7FF"
-                                                               FontSize="12" FontWeight="SemiBold"/>
-                                                    <ItemsControl ItemsSource="{Binding Items}"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                                <TextBlock Text="来源见各项悬停提示；同一指标按固定优先级选择数据源，不做多源平均。"
-                                           Foreground="#7FB6CB" FontSize="9" Margin="0,6,0,0"
-                                           TextWrapping="Wrap"/>
-                            </StackPanel>
-                        </Border>
-
-                        <!-- V2-M3.2 实时趋势：最近 2 分钟 canonical 序列，Sparkline 渲染 -->
-                        <Border Background="#0AFFFFFF" Padding="14,12" Margin="0,0,0,9"
-                                Visibility="{Binding HasTrends, Converter={StaticResource BoolToVisibilityConverter}}">
-                            <StackPanel>
-                                <TextBlock Text="实时趋势 · 最近 2 分钟"
-                                           Foreground="#D9F7FF" FontSize="12"
-                                           FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                <ItemsControl ItemsSource="{Binding TrendRows}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate>
-                                            <StackPanel Margin="0,6">
-                                                <Grid>
-                                                    <TextBlock Text="{Binding Label}"
-                                                               Foreground="#B4DEEB" FontSize="11"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               ToolTip="{Binding FullName}"/>
-                                                    <TextBlock Text="{Binding Current}"
-                                                               HorizontalAlignment="Right"
-                                                               Foreground="White" FontSize="12"
-                                                               FontWeight="SemiBold"/>
-                                                </Grid>
-                                                <controls:Sparkline Points="{Binding Points}"
-                                                                     Height="22" Margin="0,3,0,0"/>
-                                                <TextBlock HorizontalAlignment="Right" FontSize="9"
-                                                           Foreground="#A9D9E9" Margin="0,2,0,0">
-                                                    <Run Text="低 "/><Run Text="{Binding Min, Mode=OneWay}"/><Run Text="  高 "/><Run Text="{Binding Max, Mode=OneWay}"/>
-                                                </TextBlock>
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </Border>
+                        <!-- V2-M4.5C.1 Gate B：旧“实时数据 · 核心指标”卡列表已删除，
+                             与下方实时设备卡完全重复；数据源与 Meter 卡即最终右栏 -->
+                        <!-- V2-M4.5C Gate F：实时设备卡（Meter + Current/Low/High），
+                             趋势/Sparkline 区已按最终设计移除 -->
+                        <ItemsControl ItemsSource="{Binding LiveCards}" Margin="0,0,0,9">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource SensorGroupStyle}">
+                                        <StackPanel>
+                                            <TextBlock Text="{Binding Title}"
+                                                       Foreground="#D9F7FF" FontSize="12"
+                                                       FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                            <ItemsControl ItemsSource="{Binding Meters}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Margin="0,4,0,2">
+                                                            <Grid>
+                                                                <TextBlock Text="{Binding Label}"
+                                                                           Foreground="#B4DEEB" FontSize="11"/>
+                                                                <TextBlock Text="{Binding CurrentText}"
+                                                                           HorizontalAlignment="Right"
+                                                                           Foreground="White" FontSize="12"
+                                                                           FontWeight="SemiBold"/>
+                                                            </Grid>
+                                                            <controls:LiveMetricMeter
+                                                                Current="{Binding Current}"
+                                                                Low="{Binding Low}"
+                                                                High="{Binding High}"
+                                                                ScaleMin="{Binding ScaleMin}"
+                                                                ScaleMax="{Binding ScaleMax}"
+                                                                Height="12" Margin="0,3,0,0"/>
+                                                            <TextBlock HorizontalAlignment="Right" FontSize="9"
+                                                                       Foreground="#A9D9E9" Margin="0,2,0,0"
+                                                                       ToolTip="低/高值为本次实时监测期间 AIGeekTuner 观察到的范围。">
+                                                                <Run Text="低 "/><Run Text="{Binding LowText, Mode=OneWay}"/><Run Text="  高 "/><Run Text="{Binding HighText, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <ItemsControl ItemsSource="{Binding Numerics}" Margin="0,2,0,0">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,3,0,0">
+                                                            <TextBlock Text="{Binding Label}"
+                                                                       Foreground="#B4DEEB" FontSize="11"/>
+                                                            <StackPanel Orientation="Horizontal"
+                                                                        HorizontalAlignment="Right">
+                                                                <TextBlock Text="{Binding Current}"
+                                                                           Foreground="White" FontSize="12"
+                                                                           FontWeight="SemiBold"/>
+                                                                <TextBlock FontSize="9" Foreground="#A9D9E9"
+                                                                           VerticalAlignment="Bottom" Margin="6,0,0,1"
+                                                                           ToolTip="低/高值为本次实时监测期间 AIGeekTuner 观察到的范围。">
+                                                                    <Run Text="低 "/><Run Text="{Binding Low, Mode=OneWay}"/><Run Text="  高 "/><Run Text="{Binding High, Mode=OneWay}"/>
+                                                                </TextBlock>
+                                                            </StackPanel>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                            <ItemsControl ItemsSource="{Binding SubLines}">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <TextBlock Text="{Binding}"
+                                                                   Foreground="#A9D9E9" FontSize="10"
+                                                                   Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
 
 
                         <Border Background="#0CFFFFFF" Padding="18,24"

@@ -50,11 +50,27 @@ namespace AIGeekTuner.Tests.Services.Hardware.Inventory
             Assert.Equal("x64", cpu.Architecture);
             Assert.Equal(12u, cpu.PhysicalCores);
             Assert.Equal(16u, cpu.LogicalCores);
-            Assert.Equal(5400u, cpu.MaxClockSpeedMHz);
-            Assert.Equal(3200u, cpu.BaseClockSpeedMHz);
-            Assert.Equal(20480u, cpu.L2CacheSizeKB);
-            Assert.Equal(36864u, cpu.L3CacheSizeKB);
+            // V2-M4.5C Gate A 语义审计：MaxClockSpeed 是额定基准（base），
+            // CurrentClockSpeed 是当前运行频率（不得当 base）；Turbo max 无可靠来源 → null。
+            Assert.Null(cpu.MaxClockSpeedMHz);
+            Assert.Equal(5400u, cpu.BaseClockSpeedMHz);
             Assert.True(cpu.VirtualizationFirmwareEnabled);
+        }
+
+        [Fact]
+        public void Cpu_BaseClock_IsRatedBase_NotCurrentSpeed()
+        {
+            // 真机审计（i9-13980HX）：MaxClockSpeed=2200=额定基准，
+            // CurrentClockSpeed 随负载波动——绝不能把 Current 当 base。
+            var rows = new IInventoryRow[]
+            {
+                Row(("Name", "X"), ("MaxClockSpeed", 2200u), ("CurrentClockSpeed", 4600u)),
+            };
+
+            var cpu = SystemInventoryMappers.MapCpu(rows, Array.Empty<IInventoryRow>());
+
+            Assert.Equal(2200u, cpu!.BaseClockSpeedMHz);
+            Assert.Null(cpu.MaxClockSpeedMHz);
         }
 
         [Fact]
@@ -295,6 +311,50 @@ namespace AIGeekTuner.Tests.Services.Hardware.Inventory
             Assert.Equal("NTFS", partition.FileSystem);
             Assert.Equal("System", partition.Label);
             Assert.Equal(536870912000ul, partition.FreeSpaceBytes);
+        }
+
+        [Fact]
+        public void Storage_NoLetterPartitions_Char16NullJunk_NeverBecomeDriveLetters()
+        {
+            // V2-M4.5C.1 Gate F 真因回归：System.Management 把无盘符 char16 封送为
+            // '\0'（char，非 null 非空白）。真机（i9-13980HX）实测：MSFT_Partition
+            // 无盘符时 DriveLetter 封送值即 '\0'——旧实现把它当合法盘符，导致
+            // EFI/MSR/Recovery/OEM 分区全部通过 IsUserVisibleVolume 进 UI
+            //（用户看到 卷 0.3 GB / 卷 0 GB / 卷 1.1 GB / 卷 26 GB）。
+            var disks = new IInventoryRow[]
+            {
+                Row(
+                    ("DeviceId", (object)0ul),
+                    ("FriendlyName", "Samsung MZVL21T0HCLR-00B00"),
+                    ("Model", "Samsung MZVL21T0HCLR-00B00"),
+                    ("Size", (object)1_000_000_000_000ul),
+                    ("BusType", 17u)),
+            };
+            var partitions = new IInventoryRow[]
+            {
+                // 真实形态：260MB EFI / 16MB MSR / C: / 1.1GB Recovery / 26GB OEM——
+                // 无盘符分区 DriveLetter 为 char '\0'，有盘符为 char 'C'。
+                Row(("DiskNumber", 0u), ("DriveLetter", '\0'), ("Size", (object)272_629_760ul)),
+                Row(("DiskNumber", 0u), ("DriveLetter", '\0'), ("Size", (object)16_777_216ul)),
+                Row(("DiskNumber", 0u), ("DriveLetter", 'C'), ("Size", (object)994_575_384_576ul)),
+                Row(("DiskNumber", 0u), ("DriveLetter", '\0'), ("Size", (object)1_153_433_600ul)),
+                Row(("DiskNumber", 0u), ("DriveLetter", '\0'), ("Size", (object)27_917_287_424ul)),
+            };
+            var volumes = new IInventoryRow[]
+            {
+                Row(("DriveLetter", "C:"), ("FileSystem", "NTFS"), ("FileSystemLabel", "OS"),
+                    ("Size", (object)994_575_384_576ul)),
+            };
+
+            var results = StorageInventoryMapper.Map(disks, partitions, volumes);
+            var disk = Assert.Single(results);
+
+            // '\0' 绝不成为盘符；只有真实字母 'C' 保留。
+            Assert.Equal(4, disk.Partitions.Count(p => p.DriveLetter is null));
+            var lettered = disk.Partitions.Where(p => p.DriveLetter is not null).ToArray();
+            var c = Assert.Single(lettered);
+            Assert.Equal("C", c.DriveLetter);
+            Assert.Equal("NTFS", c.FileSystem);
         }
     }
 }

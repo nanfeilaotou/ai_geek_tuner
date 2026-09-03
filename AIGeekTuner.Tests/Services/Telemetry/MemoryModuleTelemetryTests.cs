@@ -107,8 +107,8 @@ namespace AIGeekTuner.Tests.Services.Telemetry
 
             var canonical = HwInfoCanonicalMapper.Map(sensors, readings, CapturedAtUtc);
 
-            var moduleTemp = Assert.Single(canonical.Where(reading =>
-                reading.MetricKey == TelemetryMetricKey.MemoryModuleTemperature));
+            var moduleTemp = Assert.Single(canonical, reading =>
+                reading.MetricKey == TelemetryMetricKey.MemoryModuleTemperature);
             Assert.Equal("memory-module:0", moduleTemp.Device.DeviceKey);
             Assert.Equal(52.0, moduleTemp.Value);
 
@@ -216,11 +216,8 @@ namespace AIGeekTuner.Tests.Services.Telemetry
 
             var canonical = LibreHardwareMonitorCanonicalMapper.Map(raw);
 
-            var moduleTemps = canonical
-                .Where(reading => reading.MetricKey == TelemetryMetricKey.MemoryModuleTemperature)
-                .ToArray();
-            _ = moduleTemps; // 断言见下（保持结构清晰）
-            var reading = Assert.Single(moduleTemps);
+            var reading = Assert.Single(canonical, r =>
+                r.MetricKey == TelemetryMetricKey.MemoryModuleTemperature);
             Assert.Equal("memory-module:1", reading.Device.DeviceKey);
             Assert.Equal(41, reading.Value);
         }

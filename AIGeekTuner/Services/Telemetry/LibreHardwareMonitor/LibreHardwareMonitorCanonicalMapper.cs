@@ -100,6 +100,14 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
                     maxValue: double.MaxValue);
                 AddIfFound(result, coreClock, TelemetryMetricKey.GpuCoreClock);
 
+                var memoryClock = SelectPreferred(
+                    gpu,
+                    TelemetryUnit.Megahertz,
+                    ["GPU Memory Clock", "Memory Clock"],
+                    requirePositiveValue: true,
+                    maxValue: double.MaxValue);
+                AddIfFound(result, memoryClock, TelemetryMetricKey.GpuMemoryClock);
+
                 var boardPower = SelectPreferred(
                     gpu,
                     TelemetryUnit.Watt,

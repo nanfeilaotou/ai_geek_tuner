@@ -6,10 +6,10 @@ using AIGeekTuner.Models.Hardware.Inventory;
 namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
 {
     /// <summary>
-    /// V2-M4.5B Gate A：Dashboard "电脑详细信息" 行装配（固定顺序）：
+    /// V2-M4.5C Gate B：Dashboard "电脑详细信息" 行装配（固定顺序 + 最终格式）。
     /// 主板 / 处理器 / 内存 / 显卡 / 显示器 / 硬盘（6 个强制行）
-    /// + 声卡 / 网卡（仅在检测到时出现）。缺值只省略次级字段。
-    /// 纯静态映射，不依赖真实机器（Gate I）。
+    /// + 声卡 / 网卡（仅在检测到有意义的物理硬件时出现）。
+    /// 原则：字段少一点 优于 展示语义错误的数据；缺失字段省略，不产生噪音。
     /// </summary>
     public static class DashboardInventoryPresenter
     {
@@ -49,14 +49,15 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
         private static InventoryDisplayRow BuildMotherboardRow(HardwareInventorySnapshot snapshot)
         {
             var board = snapshot.Motherboard;
-            var value = JoinParts(board?.Manufacturer, board?.Product);
+            var brand = InventoryDisplayText.NormalizeBoardBrand(board?.Manufacturer);
+            var value = JoinParts(brand, board?.Product);
             return new InventoryDisplayRow("主板", value ?? NotDetected);
         }
 
         private static InventoryDisplayRow BuildProcessorRow(HardwareInventorySnapshot snapshot)
         {
-            var cpu = snapshot.Cpu;
-            var value = JoinParts(cpu?.Name, cpu?.Manufacturer);
+            // Gate B：Dashboard 只显示 CPU Name（删除 GenuineIntel 等厂商噪音）。
+            var value = FirstKnown(snapshot.Cpu?.Name);
             return new InventoryDisplayRow("处理器", value ?? NotDetected);
         }
 
@@ -74,20 +75,13 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
                 .Where(module => module.CapacityBytes.HasValue)
                 .Select(module => module.CapacityBytes!.Value)
                 .ToArray();
+            var generation = modules
+                .Select(module => MemoryInventoryMapper.MapMemoryGeneration(module.SmbiosMemoryType))
+                .FirstOrDefault(label => !string.IsNullOrWhiteSpace(label));
             if (totalBytes.Length > 0)
             {
-                parts.Add(FormatBytes(totalBytes.Aggregate(0UL, (acc, value) => acc + value)));
-            }
-
-            var manufacturers = modules
-                .Select(module => module.Manufacturer)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            if (manufacturers.Length > 0)
-            {
-                parts.Add(string.Join(" / ", manufacturers));
+                var total = InventoryDisplayText.FormatCapacity(totalBytes.Aggregate(0UL, (a, b) => a + b));
+                parts.Add(generation is null ? total : total + " " + generation);
             }
 
             var speeds = modules
@@ -102,8 +96,44 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
                 parts.Add(string.Join(" / ", speeds.Select(speed => speed + " MHz")));
             }
 
-            parts.Add(modules.Count + " 条");
+            // 容量一致 → 2×16 GB；不一致 → 模块容量摘要，绝不伪造 2×X。
+            var sized = modules
+                .Where(module => module.CapacityBytes.HasValue)
+                .Select(module => module.CapacityBytes!.Value)
+                .ToArray();
+            if (sized.Length > 0)
+            {
+                parts.Add(DescribeModuleCapacities(sized));
+            }
+
+            var manufacturers = modules
+                .Select(module => module.Manufacturer)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name!.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            if (manufacturers.Length > 0)
+            {
+                parts.Add(string.Join(" / ", manufacturers));
+            }
+
             return new InventoryDisplayRow("内存", string.Join(" · ", parts));
+        }
+
+        private static string DescribeModuleCapacities(IReadOnlyList<ulong> capacities)
+        {
+            var gbList = capacities
+                .Select(bytes => bytes / 1073741824d)
+                .ToArray();
+            if (gbList.All(gb => Math.Abs(gb - gbList[0]) < 0.01))
+            {
+                return string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"{gbList.Length}×{gbList[0]:0.#} GB");
+            }
+
+            return string.Join(" + ", gbList.Select(gb =>
+                string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{gb:0.#} GB")));
         }
 
         private static InventoryDisplayRow BuildGpuRow(HardwareInventorySnapshot snapshot)
@@ -120,7 +150,7 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
             {
                 var name = FirstKnown(gpu.Name, gpu.Vendor) ?? NotDetected;
                 entries.Add(GpuDisplayPolicy.ShouldReportDedicatedVram(gpu.DedicatedVideoMemoryBytes)
-                    ? name + " (" + FormatBytes(gpu.DedicatedVideoMemoryBytes!.Value) + ")"
+                    ? name + " · " + InventoryDisplayText.FormatCapacity(gpu.DedicatedVideoMemoryBytes!.Value)
                     : name);
             }
 
@@ -158,7 +188,7 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
             {
                 parts.Add(string.Create(
                     System.Globalization.CultureInfo.InvariantCulture,
-                    $"约 {primary.DiagonalInches.Value:0.#} 英寸"));
+                    $"{primary.DiagonalInches.Value:0.#}\u0022"));
             }
 
             if (primary.IsPrimary == true)
@@ -188,47 +218,59 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
             foreach (var disk in disks)
             {
                 var name = FirstKnown(disk.FriendlyName, disk.Model) ?? NotDetected;
-                var capacity = disk.SizeBytes.HasValue ? FormatBytes(disk.SizeBytes.Value) : null;
-                entries.Add(capacity is null ? name : name + " " + capacity);
+                var capacity = disk.SizeBytes.HasValue
+                    ? InventoryDisplayText.FormatCapacity(disk.SizeBytes.Value)
+                    : null;
+                entries.Add(capacity is null ? name : name + " · " + capacity);
             }
 
             return new InventoryDisplayRow("硬盘", string.Join(" / ", entries));
         }
 
-        /// <summary>声卡行：优先 hardware audio controller；没有控制器时才退回播放端点摘要。</summary>
+        /// <summary>
+        /// 声卡行：只显示有意义的物理音频控制器；排除 Virtual/Bluetooth/虚拟端点
+        /// 类噪音，绝不把 CoreAudio endpoint 堆进 Dashboard。无合格控制器 → 省略行。
+        /// </summary>
         private static InventoryDisplayRow? BuildAudioRow(HardwareInventorySnapshot snapshot)
         {
             var controllers = (snapshot.AudioControllers ?? Array.Empty<AudioControllerInfo>())
-                .Where(controller => !string.IsNullOrWhiteSpace(controller.Name))
+                .Where(controller => IsMeaningfulAudioController(controller.Name))
                 .Select(controller => controller.Name!.Trim())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
-            if (controllers.Length > 0)
-            {
-                return new InventoryDisplayRow("声卡", Summarize(controllers));
-            }
-
-            var playback = snapshot.AudioDevices
-                .Where(device => device.Direction == AudioEndpointDirection.Playback)
-                .Select(device => device.FriendlyName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
-            if (playback.Length == 0)
+            if (controllers.Length == 0)
             {
                 return null;
             }
 
-            return new InventoryDisplayRow("声卡", Summarize(playback));
+            return new InventoryDisplayRow("声卡", Summarize(controllers));
         }
 
-        /// <summary>网卡行：Dashboard 只显示物理适配器；虚拟适配器只在详情页保留。</summary>
+        /// <summary>物理控制器判定：排除 obvious 虚拟/蓝牙软件组件（极小黑名单）。</summary>
+        public static bool IsMeaningfulAudioController(string? name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            foreach (var noise in new[] { "Virtual", "Bluetooth", "蓝牙", "VB-Audio", "VB-Cable", "Sonar" })
+            {
+                if (name.Contains(noise, StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        /// <summary>网卡行：Dashboard 显示物理适配器型号（Description），不显示连接别名。</summary>
         private static InventoryDisplayRow? BuildNetworkRow(HardwareInventorySnapshot snapshot)
         {
             var physical = snapshot.NetworkAdapters
                 .Where(adapter => !adapter.IsVirtual)
-                .Select(adapter => FirstKnown(adapter.Name, adapter.Description))
+                .Select(adapter => FirstKnown(adapter.Description, adapter.Name))
                 .Where(name => name is not null)
                 .Select(name => name!)
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -262,11 +304,6 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
                 .ToArray();
             return parts.Length > 0 ? string.Join(" · ", parts) : null;
         }
-
-        internal static string FormatBytes(ulong bytes) =>
-            string.Create(
-                System.Globalization.CultureInfo.InvariantCulture,
-                $"{bytes / 1073741824d:0.#} GB");
 
         private const string NotDetected = "未检测到";
     }

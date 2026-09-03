@@ -80,6 +80,12 @@ namespace AIGeekTuner.Services.Hardware.Inventory
                 SystemInventoryMappers.MapAudioControllers(_wmi.Query("Win32_SoundDevice")));
             var network = ListSection("Network", () => NetworkInventoryMapper.Map(
                 _networkAdapters.GetAdapters()));
+            // V2-M4.5C.1 Gate I：电池（Win32_Battery + root\WMI Battery* best-effort）。
+            var battery = Section("Battery", () => BatteryInventoryMapper.Map(
+                _wmi.Query("BatteryStaticData", MonitorScope),
+                _wmi.Query("BatteryFullChargedCapacity", MonitorScope),
+                _wmi.Query("BatteryStatus", MonitorScope),
+                _wmi.Query("Win32_Battery")));
 
             return new HardwareInventorySnapshot(
                 Cpu: cpu,
@@ -93,7 +99,8 @@ namespace AIGeekTuner.Services.Hardware.Inventory
                 AudioDevices: audio,
                 NetworkAdapters: network,
                 CollectedAtUtc: DateTimeOffset.UtcNow,
-                AudioControllers: audioControllers);
+                AudioControllers: audioControllers,
+                Battery: battery);
         }
 
         private IReadOnlyList<MonitorInventoryInfo> CollectMonitors()

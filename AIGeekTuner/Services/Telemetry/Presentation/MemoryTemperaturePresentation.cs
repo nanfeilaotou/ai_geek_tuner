@@ -46,6 +46,95 @@ namespace AIGeekTuner.Services.Telemetry.Presentation
                 .ToArray();
         }
 
+        /// <summary>V2-M4.5C Gate I：带用户可读标签的单模块温度。</summary>
+    public sealed record ModuleTemperatureLabel(
+        string ModuleKey,
+        string Label,
+        double ValueCelsius);
+
+    /// <summary>
+    /// V2-M4.5C Gate I：把 resolved 模块温度映射为用户可读名称。
+    /// 优先用 HWiNFO DDR5 传感器提供的 SMBIOS DeviceLocator 强 ID 对齐静态
+    /// inventory 的 DeviceLocator 顺序 → “DIMM 1 / DIMM 2”；无法可靠映射时
+    /// 使用安全占位名（“内存模块 A/B…”），绝不显示 memory-module:N 源键，
+    /// 也不在无证据时伪造 DIMM 序号。
+    /// </summary>
+    public static IReadOnlyList<ModuleTemperatureLabel> DescribeWithLabels(
+        TelemetrySnapshot snapshot,
+        IReadOnlyList<Models.Hardware.Inventory.MemoryModuleInfo>? staticMemoryModules)
+    {
+        var rows = CollectCurrentRows(snapshot);
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        // 源本地模块 → DeviceLocator 强 ID。canonical 键形如 src:{source}:{nativeId}
+        // （未合并）或合并组键；用 Raw 层 (Source, NativeDeviceId) 重建映射。
+        var locatorByKey = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var raw in snapshot.RawReadings)
+        {
+            if (raw.Device.Kind != TelemetryDeviceKind.MemoryModule)
+            {
+                continue;
+            }
+
+            var locator = raw.DeviceInfo.StrongIds.FirstOrDefault(strongId =>
+                strongId.StartsWith("locator:", StringComparison.Ordinal));
+            if (locator is null)
+            {
+                continue;
+            }
+
+            var value = locator["locator:".Length..];
+            locatorByKey.TryAdd(raw.Device.DeviceKey, value);
+            locatorByKey.TryAdd(
+                "src:" + raw.Source + ":" + raw.DeviceInfo.NativeDeviceId,
+                value);
+        }
+
+        var fallbackIndex = 0;
+        var result = new List<ModuleTemperatureLabel>(rows.Count);
+        foreach (var row in rows)
+        {
+            string label;
+            if (locatorByKey.TryGetValue(row.ModuleKey, out var locator)
+                && staticMemoryModules is not null)
+            {
+                var index = -1;
+                for (var i = 0; i < staticMemoryModules.Count; i++)
+                {
+                    if (string.Equals(
+                        staticMemoryModules[i].DeviceLocator,
+                        locator,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+
+                label = index >= 0 ? "DIMM " + (index + 1) : FallbackLabel(fallbackIndex++);
+            }
+            else
+            {
+                label = FallbackLabel(fallbackIndex++);
+            }
+
+            result.Add(new ModuleTemperatureLabel(row.ModuleKey, label, row.ValueCelsius));
+        }
+
+        return result;
+
+        static string FallbackLabel(int index)
+        {
+            const string letters = "ABCDEFGH";
+            return index < letters.Length
+                ? "内存模块 " + letters[index]
+                : "内存模块 " + (index + 1);
+        }
+    }
+
         /// <summary>
         /// 当前所有 resolved memory.module.temperature 中的最大值；
         /// 没有任何模块温度读数时返回 null。仅用于 UI 摘要（M4.5C）。

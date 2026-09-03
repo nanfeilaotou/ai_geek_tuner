@@ -26,6 +26,9 @@ namespace AIGeekTuner.Services.Telemetry.Aida64
         [GeneratedRegex("^SGPU(\\d{1,2})CLK$", RegexOptions.IgnoreCase)]
         private static partial Regex GpuCoreClockRegex();
 
+        [GeneratedRegex("^SGPU(\\d{1,2})MEMCLK$", RegexOptions.IgnoreCase)]
+        private static partial Regex GpuMemoryClockRegex();
+
         [GeneratedRegex("^SGPU(\\d{1,2})UTI$", RegexOptions.IgnoreCase)]
         private static partial Regex GpuUtilizationRegex();
 
@@ -213,6 +216,17 @@ namespace AIGeekTuner.Services.Telemetry.Aida64
                     AddGpuIfPlausible(
                         result, reading, coreClock.Groups[1].Value,
                         TelemetryMetricKey.GpuCoreClock,
+                        TelemetryUnit.Megahertz,
+                        value => value >= 0);
+                    continue;
+                }
+
+                var memoryClock = GpuMemoryClockRegex().Match(id);
+                if (memoryClock.Success)
+                {
+                    AddGpuIfPlausible(
+                        result, reading, memoryClock.Groups[1].Value,
+                        TelemetryMetricKey.GpuMemoryClock,
                         TelemetryUnit.Megahertz,
                         value => value >= 0);
                     continue;

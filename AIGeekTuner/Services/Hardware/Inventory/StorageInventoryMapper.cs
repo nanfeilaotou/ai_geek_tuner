@@ -91,8 +91,21 @@ namespace AIGeekTuner.Services.Hardware.Inventory
                 .ToArray();
         }
 
-        private static string? NormalizeDriveLetter(string? letter) =>
-            string.IsNullOrWhiteSpace(letter) ? null : letter.Trim().TrimEnd(':').ToUpperInvariant();
+        private static string? NormalizeDriveLetter(string? letter)
+        {
+            if (string.IsNullOrWhiteSpace(letter))
+            {
+                return null;
+            }
+
+            var text = letter.Trim().TrimEnd(':');
+            // V2-M4.5C.1 Gate F 真因：System.Management 把无盘符的 char16 封送为
+            // '\0'（非 null 非空白），旧实现把它当成合法盘符 → EFI/Recovery/OEM
+            // 分区全部通过 IsUserVisibleVolume 过滤进 UI。只接受单个 ASCII 字母。
+            return text.Length == 1 && char.IsAsciiLetter(text[0])
+                ? char.ToUpperInvariant(text[0]).ToString()
+                : null;
+        }
 
         // MSFT_PhysicalDisk.BusType：1=SCSI 2=ATAPI 3=ATA 4=IEEE1394 5=SSA 6=FibreChannel
         // 7=USB 8=RAID 9=iSCSI 10=SAS 11=SATA 12=SD 13=MMC 14=Virtual 15=FileBackedVirtual

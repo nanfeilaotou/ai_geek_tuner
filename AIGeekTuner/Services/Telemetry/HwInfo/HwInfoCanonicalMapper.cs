@@ -156,6 +156,11 @@ namespace AIGeekTuner.Services.Telemetry.HwInfo
                     Add(result, TelemetryMetricKey.GpuCoreClock, reading, unit, device, capturedAtUtc);
                     break;
 
+                case TelemetryUnit.Megahertz when reading.Value >= 0
+                    && LabelEquals(label, "GPU Memory Clock"):
+                    Add(result, TelemetryMetricKey.GpuMemoryClock, reading, unit, device, capturedAtUtc);
+                    break;
+
                 case TelemetryUnit.Megabyte or TelemetryUnit.Gigabyte when reading.Value >= 0
                     && LabelEquals(label, "GPU Memory Used"):
                     Add(
@@ -303,7 +308,10 @@ namespace AIGeekTuner.Services.Telemetry.HwInfo
                     .FirstOrDefault(pair => pair.index == sensorIndex).position;
                 return new SourceDeviceInfo(
                     TelemetrySourceKind.HwInfo, TelemetryDeviceKind.Gpu,
-                    $"gpu:{sensorIndex}", sensor.SensorName, ordinal, []);
+                    // V2-M4.5C 修复：canonical Device（GpuByIndex(ordinal)）与
+                    // SourceDeviceInfo.NativeDeviceId 必须同键，否则 Hub lookup
+                    // 永远 miss，HWiNFO GPU 永远不与其它来源合并。
+                    $"gpu:{ordinal}", sensor.SensorName, ordinal, []);
             }
 
             // V2-M4.5B：每模块传感器（RAM Module #N / DIMM N / DDR5 DIMM [#N] (…)）

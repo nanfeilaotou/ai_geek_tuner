@@ -26,6 +26,7 @@ namespace AIGeekTuner.Models.Telemetry
             TelemetryMetricKey.GpuBoardPower,
             TelemetryMetricKey.GpuCoreUtilization,
             TelemetryMetricKey.GpuCoreClock,
+            TelemetryMetricKey.GpuMemoryClock,
             TelemetryMetricKey.GpuMemoryUsed,
         ];
 
