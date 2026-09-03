@@ -143,7 +143,10 @@ namespace AIGeekTuner
             var analysisChatClient = new OllamaChatClient(
                 _httpClient,
                 () => ConfigurationStore.Snapshot().Ollama);
-            var analysisService = new OllamaSessionAnalysisService(analysisChatClient, new SessionAnalysisPromptBuilder());
+            var analysisService = new OllamaSessionAnalysisService(
+                analysisChatClient,
+                new SessionAnalysisPromptBuilder(),
+                modelNameProvider: () => ConfigurationStore.Snapshot().Ollama.ModelName);
             var analysisStore = new SessionAnalysisStore(applicationDataPaths.SessionsDirectory);
 
             // V2-M4.2：Windows Incident correlation（录制结束后的独立证据采集阶段）。

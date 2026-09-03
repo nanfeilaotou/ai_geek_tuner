@@ -20,15 +20,26 @@ namespace AIGeekTuner.ViewModels
 {
     public sealed class SessionListItem
     {
-        public SessionListItem(string id, string startedText, string durationText, int sampleCount)
+        public SessionListItem(string id, string startedText, string durationText, int sampleCount, bool isAnalyzed)
         {
             Id = id; StartedText = startedText; DurationText = durationText; SampleCount = sampleCount;
+            IsAnalyzed = isAnalyzed;
         }
 
         public string Id { get; }
         public string StartedText { get; }
         public string DurationText { get; }
         public int SampleCount { get; }
+
+        /// <summary>M4.5E.1 补充：analysis.json 是否存在（录制多时一眼分清哪个有 AI 结果）。</summary>
+        public bool IsAnalyzed { get; }
+
+        /// <summary>历史行状态后缀：完成状态标记，不是健康判断。</summary>
+        public string AnalysisStateText => IsAnalyzed ? "已分析" : "未分析";
+
+        /// <summary>UIA/屏幕阅读器行名回退到 ToString——给出可读行文本而非类型名。</summary>
+        public override string ToString() =>
+            StartedText + "  " + DurationText + "  " + SampleCount + " samples  " + AnalysisStateText;
     }
 
     public sealed class LiveMetricRow
@@ -189,6 +200,34 @@ namespace AIGeekTuner.ViewModels
         private string _intervalText = "2 s";
         private SessionListItem? _selectedRecent;
 
+        // ---- V2-M4.5E：页面内部三状态 presentation（Gate B）----
+        /// <summary>
+        /// 同一 SessionsPage 内部的 presentation 状态，不是 App 级导航、不新增 AppPage：
+        /// Record = 开始/进行中录制视图；History = 录制历史浏览；Detail = 已载入会话详情。
+        /// ViewModel 随 MainWindow 单例存活——切页离开再回来，模式天然保留（Gate H）。
+        /// </summary>
+        public enum SessionPageMode { Record, History, Detail }
+
+        private SessionPageMode _pageMode = SessionPageMode.Record;
+
+        public SessionPageMode PageMode
+        {
+            get => _pageMode;
+            private set
+            {
+                if (SetProperty(ref _pageMode, value))
+                {
+                    OnPropertyChanged(nameof(IsRecordMode));
+                    OnPropertyChanged(nameof(IsHistoryMode));
+                    OnPropertyChanged(nameof(IsDetailMode));
+                }
+            }
+        }
+
+        public bool IsRecordMode => PageMode == SessionPageMode.Record;
+        public bool IsHistoryMode => PageMode == SessionPageMode.History;
+        public bool IsDetailMode => PageMode == SessionPageMode.Detail;
+
         public SessionsViewModel(
             ITelemetryRecordingService recorder,
             ITelemetrySessionStore store,
@@ -212,7 +251,13 @@ namespace AIGeekTuner.ViewModels
             _incidentCorrelation = incidentCorrelation ?? throw new ArgumentNullException(nameof(incidentCorrelation));
             _incidentStore = incidentStore ?? throw new ArgumentNullException(nameof(incidentStore));
 
-            AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync, () => !IsAnalyzing);
+            // M4.5E.3 Gate E：app 在 UI 线程构造 ViewModel → 捕获 Dispatcher 同步上下文；
+            // 单元测试/无 WPF 宿主下可能为 null → UI 回退为内联执行（RunOnUiThread）。
+            _uiSynchronizationContext = SynchronizationContext.Current;
+            _uiThreadId = Environment.CurrentManagedThreadId;
+
+            AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync,
+                () => !IsAnalyzing && CurrentDetailSessionId is not null);
             PlaySpokenSummaryCommand = new RelayCommand(PlaySpokenSummary, () =>
                 !IsRecording && HasAnalysis && !string.IsNullOrWhiteSpace(SpokenSummary)
                 && VoiceState is VoicePlaybackState.Idle or VoicePlaybackState.Error);
@@ -221,6 +266,11 @@ namespace AIGeekTuner.ViewModels
             StopAndAnalyzeCommand = new AsyncRelayCommand(StopAndAnalyzeAsync, () => IsRecording);
             SelectRecentCommand = new RelayCommand(SelectRecent, () => SelectedRecent is not null);
             DeleteRecentCommand = new RelayCommand(DeleteRecent, () => SelectedRecent is not null);
+
+            // V2-M4.5E Gate C：头部常驻操作。OpenRecordView 只切视图——录制中语义是
+            // “返回当前录制”（按钮文案随 IsRecording 切换），绝不停录、绝不二次启动。
+            OpenRecordViewCommand = new RelayCommand(OpenRecordView);
+            OpenHistoryViewCommand = new RelayCommand(OpenHistoryView);
 
             // 录制独立于页面生命周期：构造时若已有活动会话（切页回来）直接恢复视图。
             SyncFromRecorder();
@@ -234,11 +284,45 @@ namespace AIGeekTuner.ViewModels
         public ObservableCollection<StatisticRow> Statistics { get; } = [];
         public ObservableCollection<EventRow> Events { get; } = [];
 
-        public SessionListItem? SelectedRecent { get => _selectedRecent; set => SetProperty(ref _selectedRecent, value); }
+        public SessionListItem? SelectedRecent
+        {
+            get => _selectedRecent;
+            set
+            {
+                if (SetProperty(ref _selectedRecent, value))
+                {
+                    // V2-M4.5D Gate Q 回归修复：选中状态变化必须刷新依赖它的命令，
+                    // 否则分析按钮会以“可用”外观静默 no-op（AnalyzeAsync 直接 return）。
+                    AnalyzeCommand.NotifyCanExecuteChanged();
+                    SelectRecentCommand.NotifyCanExecuteChanged();
+                    DeleteRecentCommand.NotifyCanExecuteChanged();
+                }
+            }
+        }
 
-        public bool IsRecording { get => _isRecording; private set { if (SetProperty(ref _isRecording, value)) OnPropertyChanged(nameof(HasEmptyState)); } }
+        public bool IsRecording
+        {
+            get => _isRecording;
+            private set
+            {
+                if (SetProperty(ref _isRecording, value))
+                {
+                    OnPropertyChanged(nameof(HasEmptyState));
+                    // V2-M4.5E Gate C/I：录制中头部按钮文案“新建录制”↔“返回当前录制”。
+                    OnPropertyChanged(nameof(NewRecordingButtonText));
+                }
+            }
+        }
         public bool HasResult { get => _hasResult; private set { if (SetProperty(ref _hasResult, value)) OnPropertyChanged(nameof(HasEmptyState)); } }
-        public bool HasEmptyState => !IsRecording && !HasResult;
+
+        /// <summary>V2-M4.5E：Record 视图内“开始录制入口”的可见性（不再依赖 HasResult——那是 Detail 的状态）。</summary>
+        public bool HasEmptyState => !IsRecording;
+
+        /// <summary>Gate C：历史视图空态（无任何已保存会话）。</summary>
+        public bool HasNoHistory => RecentSessions.Count == 0;
+
+        /// <summary>Gate I：录制已存在时，页头“新建录制”语义变为“返回当前录制”（唯一导航入口）。</summary>
+        public string NewRecordingButtonText => IsRecording ? "返回当前录制" : "新建录制";
         public bool HasError { get => _hasError; private set => SetProperty(ref _hasError, value); }
         public string ErrorText { get => _errorText; private set => SetProperty(ref _errorText, value); }
         public string ElapsedText { get => _elapsedText; private set => SetProperty(ref _elapsedText, value); }
@@ -249,6 +333,8 @@ namespace AIGeekTuner.ViewModels
         public AsyncRelayCommand StopAndAnalyzeCommand { get; }
         public RelayCommand SelectRecentCommand { get; }
         public RelayCommand DeleteRecentCommand { get; }
+        public RelayCommand OpenRecordViewCommand { get; }
+        public RelayCommand OpenHistoryViewCommand { get; }
 
         // ---- V2-M3：AI 分析 ----
         private readonly ISessionAnalysisService _analysisService;
@@ -261,13 +347,34 @@ namespace AIGeekTuner.ViewModels
         private string _analysisError = string.Empty;
         private string _analysisDurationText = string.Empty;
 
+        // M4.5E.2 Gate C：进行中的分析操作属于发起时的目标会话。
+        // 当前只允许一个并发分析（最小设计，不造 TaskRegistry）。
+        private string? _activeAnalysisSessionId;
+
         public ObservableCollection<AnalysisFindingRow> Findings { get; } = [];
         public ObservableCollection<string> Recommendations { get; } = [];
         public ObservableCollection<string> Uncertainties { get; } = [];
 
         public AsyncRelayCommand AnalyzeCommand { get; }
 
-        public bool IsAnalyzing { get => _isAnalyzing; private set => SetProperty(ref _isAnalyzing, value); }
+        public bool IsAnalyzing
+        {
+            get => _isAnalyzing;
+            private set
+            {
+                if (SetProperty(ref _isAnalyzing, value))
+                {
+                    AnalyzeCommand.NotifyCanExecuteChanged();
+                }
+            }
+        }
+
+        /// <summary>
+        /// M4.5E.2 Gate C：分析中的可见性按会话隔离——只有 Detail 正在展示
+        /// 正被分析的那个会话时才为 true。全局 IsAnalyzing 只作并发守卫。
+        /// </summary>
+        public bool IsCurrentDetailAnalyzing =>
+            _activeAnalysisSessionId is not null && _activeAnalysisSessionId == CurrentDetailSessionId;
         public bool HasAnalysis { get => _hasAnalysis; private set => SetProperty(ref _hasAnalysis, value); }
         public string AssessmentBadge { get => _assessmentBadge; private set => SetProperty(ref _assessmentBadge, value); }
         public string ConfidenceText { get => _confidenceText; private set => SetProperty(ref _confidenceText, value); }
@@ -281,7 +388,46 @@ namespace AIGeekTuner.ViewModels
         private readonly Func<VoiceConfiguration> _voiceSnapshot;
         private VoicePlaybackState _voiceState = VoicePlaybackState.Idle;
         private string _spokenSummary = string.Empty;
-        private string _voiceStateText = "未生成";
+        private string? _currentSessionId;
+
+        // M4.5E.2 Gate J：进行中的语音操作（生成/播放）属于发起时的目标会话，
+        // 只影响该会话的显示；用户切到其它会话时绝不污染。
+        private string? _activeVoiceSessionId;
+
+        // M4.5E.3 Gate E：ViewModel 在组合根（UI 线程）构造——捕获该线程的同步上下文，
+        // 后台语音回调的唯一 UI 状态回写通道。绝不依赖 Application.Current（曾因并行
+        // 测试中的 foreign Application 延迟回调导致状态滞留，禁止改回）。
+        private readonly SynchronizationContext? _uiSynchronizationContext;
+
+        /// <summary>构造线程（app = UI 线程）的 ManagedThreadId；已在 UI 线程时内联执行。</summary>
+        private readonly int _uiThreadId;
+
+        // M4.5E.3 Gate F：当前 Error 态的用户可读简短文案（播放失败 / 预生成失败）。
+        // 技术细节留在 ExceptionLogWriter 与 ErrorText，UI 只展示短句。
+        private string? _voiceFailureText;
+
+        /// <summary>
+        /// M4.5E.1 Gate A/B：Detail 当前展示的会话 Id。与 SelectedRecent（History 列表选择）
+        /// 是两个独立概念，绝不让一个属性同时承担——stop 后列表选择可以仍是旧 A，Detail 必须是 B。
+        /// </summary>
+        public string? CurrentDetailSessionId => _currentSessionId;
+
+        /// <summary>更新 Detail 展示会话并刷新依赖它的命令（分析/播放/状态显示都以 Detail 会话为准）。</summary>
+        private void SetCurrentDetailSession(string? sessionId)
+        {
+            if (_currentSessionId == sessionId)
+            {
+                return;
+            }
+
+            _currentSessionId = sessionId;
+            AnalyzeCommand.NotifyCanExecuteChanged();
+            PlaySpokenSummaryCommand.NotifyCanExecuteChanged();
+            // M4.5E.2：切换 Detail 会话后，分析/语音的 per-session 显示状态全部重算。
+            OnPropertyChanged(nameof(IsCurrentDetailAnalyzing));
+            OnPropertyChanged(nameof(IsCurrentDetailVoiceBusy));
+            OnPropertyChanged(nameof(VoiceStateText));
+        }
 
         public RelayCommand PlaySpokenSummaryCommand { get; }
 
@@ -310,20 +456,63 @@ namespace AIGeekTuner.ViewModels
         public bool HasIncidentStateText { get => _hasIncidentStateText; private set => SetProperty(ref _hasIncidentStateText, value); }
         public bool HasIncidentOverflow { get => _hasIncidentOverflow; private set => SetProperty(ref _hasIncidentOverflow, value); }
 
-        public string SpokenSummary { get => _spokenSummary; private set => SetProperty(ref _spokenSummary, value); }
-        public string VoiceStateText { get => _voiceStateText; private set => SetProperty(ref _voiceStateText, value); }
+        public string SpokenSummary
+        {
+            get => _spokenSummary;
+            private set
+            {
+                if (SetProperty(ref _spokenSummary, value))
+                {
+                    OnPropertyChanged(nameof(VoiceStateText));
+                }
+            }
+        }
+
+        /// <summary>
+        /// M4.5E.2 Gate G/J：语音状态文本是<strong>计算属性</strong>，按“当前 Detail 会话”实时重算——
+        /// 操作中（生成/播放）只对发起会话可见；缓存以磁盘事实（HasCachedVoice）为准，
+        /// analysis 存在 ≠ 语音存在。重启后第一次 ShowDetail 即可正确显示“已生成”。
+        /// </summary>
+        public string VoiceStateText
+        {
+            get
+            {
+                if (IsCurrentDetailVoiceBusy)
+                {
+                    // 忙即“进行中”：生成（或操作状态被会话切换重置后回到生成会话）都显示生成中。
+                    return _voiceState == VoicePlaybackState.Playing ? "播放中…" : "正在生成语音…";
+                }
+
+                if (string.IsNullOrWhiteSpace(SpokenSummary))
+                {
+                    return "未生成";
+                }
+
+                // M4.5E.3 Gate F：失败态先于缓存事实——否则“播放失败”会被“已生成”掩盖
+                //（用户点击播放 → 失败 → 界面毫无反应的可见性缺口）。
+                if (_voiceState == VoicePlaybackState.Error)
+                {
+                    return _voiceFailureText ?? "语音预生成失败，播放时会重试";
+                }
+
+                if (CurrentDetailSessionId is not null && _analysisStore.HasCachedVoice(CurrentDetailSessionId))
+                {
+                    return "语音已生成 · 播放将直接使用缓存";
+                }
+
+                return "未生成";
+            }
+        }
+
+        /// <summary>M4.5E.2 Gate J：语音操作忙只对发起会话可见。</summary>
+        public bool IsCurrentDetailVoiceBusy =>
+            _activeVoiceSessionId is not null && _activeVoiceSessionId == CurrentDetailSessionId;
 
         public VoicePlaybackState VoiceState { get => _voiceState; private set
             {
                 if (SetProperty(ref _voiceState, value))
                 {
-                    VoiceStateText = value switch
-                    {
-                        VoicePlaybackState.Generating => "正在生成语音…",
-                        VoicePlaybackState.Playing => "播放中…",
-                        VoicePlaybackState.Error => "语音服务出错",
-                        _ => "未生成",
-                    };
+                    OnPropertyChanged(nameof(VoiceStateText));
                     PlaySpokenSummaryCommand.NotifyCanExecuteChanged();
                 }
             }
@@ -331,6 +520,75 @@ namespace AIGeekTuner.ViewModels
 
         public enum VoicePlaybackState { Idle, Generating, Playing, Error }
 
+
+        /// <summary>
+        /// Gate C：头部“新建录制”。只切换到 Record 视图、不开始采样——开始始终由用户
+        /// 点击“开始录制”触发。录制中该按钮文案为“返回当前录制”（Gate I），
+        /// 绝不停掉进行中的会话、也绝不启动第二个录制。
+        /// </summary>
+        private void OpenRecordView()
+        {
+            PageMode = SessionPageMode.Record;
+        }
+
+        /// <summary>
+        /// Gate E：History 是独立可进入视图（无需先录制）。只读已保存会话清单，
+        /// 不重新查询 EventLog、不重新分析 AI、不触碰 recorder（录制在后台继续）。
+        /// Detail 顶部的“← 返回历史”复用同一命令。
+        /// </summary>
+        private void OpenHistoryView()
+        {
+            LoadRecent();
+            PageMode = SessionPageMode.History;
+        }
+
+        /// <summary>
+        /// Gate H：从其它页面返回 Sessions 的入口规则（SessionsPage.Loaded 调用）。
+        /// 录制中 → 一律回 Record 视图（恢复当前录制状态）；未录制 → 保留最近的
+        /// 内部模式（Detail 只在详情仍有效时保留）。简单一致，不建导航历史。
+        /// </summary>
+        public void OnPageEntered()
+        {
+            if (IsRecording)
+            {
+                PageMode = SessionPageMode.Record;
+            }
+            else if (PageMode == SessionPageMode.Detail && !HasResult)
+            {
+                PageMode = SessionPageMode.Record;
+            }
+        }
+
+        /// <summary>
+        /// M4.5E.1 Gate B：唯一进入 Detail 的入口——History 查看与 Stop 完成统一走这里。
+        /// Detail 展示的会话 = 本方法收到的 session 对象，绝不从 History 列表选择、
+        /// 列表排序或上一次浏览状态推断。
+        /// </summary>
+        private void ShowDetail(TelemetryRecordingSession session)
+        {
+            BuildSummary(session);
+            SetCurrentDetailSession(session.Id);
+
+            // 先载入 Windows 事件证据行（旧 Session 无文件 → NotCaptured），
+            // 再恢复 AI 状态——RenderAnalysis 的 AI 标记刷新需要行已存在才能落到对应 incident 上。
+            LoadIncidentEvidence(session.Id);
+
+            // 切换展示会话必须重置上一会话的 AI 展示状态——
+            // 修复“浏览过 A 的分析残留到 B 的 Detail”（stale 的另一半）。
+            ResetAnalysisState();
+            var analysis = _analysisStore.Load(session.Id);
+            if (analysis is not null)
+            {
+                RenderAnalysis(
+                    analysis.Result,
+                    analysis.ModelName,
+                    analysis.DurationMs,
+                    analysis.ContextJson,
+                    analysis.SessionId);
+            }
+
+            PageMode = SessionPageMode.Detail;
+        }
 
         public void StartRecording()
         {
@@ -353,6 +611,8 @@ namespace AIGeekTuner.ViewModels
 
         public async Task StopAndAnalyzeAsync()
         {
+            // Gate C ①：Stop → completed session（recorder 内部 finalize + session.json 落盘）。
+            // 这里拿到的就是刚刚完成的 B 本体，绝不允许再从列表/选择反推。
             var session = await _recorder.StopAsync().ConfigureAwait(true);
             if (session is null)
             {
@@ -366,15 +626,17 @@ namespace AIGeekTuner.ViewModels
                 ErrorText = _recorder.LastError;
             }
 
-            BuildSummary(session);
             SyncFromRecorder();
-            LoadRecent();
 
-            // V2-M4.2：录制结束后的独立 Windows 证据采集阶段（Recorder 本身不碰事件日志）。
+            // Gate C ②：Windows 证据采集阶段——针对刚刚完成的 B（Recorder 本身不碰事件日志）。
             await CaptureIncidentsAsync(session).ConfigureAwait(true);
 
-            // V2-M4.4：采集结束后展示本次会话的事件证据（AI 未运行 → 暂无 AI 标记）。
-            LoadIncidentEvidence(session.Id);
+            // Gate C ③：刷新历史集合。M4.5E.1：不再从列表反推“最新一条”，
+            // 也绝不动 History 选择（SelectedRecent 保持用户原样）。
+            LoadRecent();
+
+            // Gate C ④/⑤/⑥：DisplayedSession = B → 载入 B 的 incident/analysis 状态 → Mode = Detail。
+            ShowDetail(session);
         }
 
         /// <summary>
@@ -572,13 +834,19 @@ namespace AIGeekTuner.ViewModels
                     session.Id,
                     session.StartedAtUtc.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
                     FormatDuration((session.CompletedAtUtc ?? session.StartedAtUtc) - session.StartedAtUtc),
-                    session.Samples.Count));
+                    session.Samples.Count,
+                    // M4.5E.1 补充：已分析/未分析状态（只查文件存在，绝不触发分析）。
+                    isAnalyzed: _analysisStore.AnalysisExists(session.Id)));
             }
+
+            OnPropertyChanged(nameof(HasNoHistory));
         }
 
         private void SelectRecent()
         {
-            if (SelectedRecent is null || IsRecording)
+            // V2-M4.5E Gate I：录制中也允许浏览 Detail（只读历史会话；BuildSummary 只写
+            // Statistics/Events，与录制中的 LiveMetrics 互不干扰）。绝不动 recorder。
+            if (SelectedRecent is null)
             {
                 return;
             }
@@ -591,32 +859,8 @@ namespace AIGeekTuner.ViewModels
                 return;
             }
 
-            if (full.Summary is null)
-            {
-                full = full with { Summary = TelemetrySessionAnalyzer.Analyze(full) };
-            }
-
-            BuildSummary(full);
-            HasResult = true;
-
-            // V2-M4.4：只读载入已持久化的 Windows 事件证据（旧 Session 无文件 → NotCaptured）。
-            LoadIncidentEvidence(full.Id);
-
-            // Gate 0.3：analysis.json 存在则恢复 AI 区；损坏文件 Load 返回 null，
-            // 不影响会话本体加载（session.json 始终是独立事实源）。
-            ResetAnalysisState();
-            var analysis = _analysisStore.Load(full.Id);
-            if (analysis is not null)
-            {
-                ApplyAnalysis(
-                    analysis.Result,
-                    analysis.ModelName,
-                    analysis.DurationMs,
-                    analysis.ContextJson,
-                    analysis.SessionId,
-                    analysis.RepairUsed,
-                    persist: false);
-            }
+            // M4.5E.1 Gate B：History → Detail 统一经唯一入口。
+            ShowDetail(full);
         }
 
         /// <summary>切换会话时清空上一会话的 AI 展示状态（Gate 0.3）。</summary>
@@ -632,7 +876,10 @@ namespace AIGeekTuner.ViewModels
             Findings.Clear();
             Recommendations.Clear();
             Uncertainties.Clear();
+            _voiceFailureText = null;
             VoiceState = VoicePlaybackState.Idle;
+            // V2-M4.5D Gate Q：切换会话清空后同样要刷新播放按钮可用性。
+            PlaySpokenSummaryCommand.NotifyCanExecuteChanged();
         }
 
         private void DeleteRecent()
@@ -651,6 +898,15 @@ namespace AIGeekTuner.ViewModels
             _store.Delete(id);
             SelectedRecent = null;
             LoadRecent();
+
+            // V2-M4.5E Gate J(12)：删掉的若是当前 Detail 载入的会话，Detail 状态一并失效，
+            // 避免“详情悬挂”。删除只发生在 History 视图——保持 History，不清走用户位置。
+            if (_currentSessionId == id)
+            {
+                HasResult = false;
+                SetCurrentDetailSession(null);
+                ResetAnalysisState();
+            }
         }
 
         private void BuildSummary(TelemetryRecordingSession session)
@@ -696,20 +952,26 @@ namespace AIGeekTuner.ViewModels
 
         public async Task AnalyzeAsync()
         {
-            if (IsAnalyzing || SelectedRecent is null)
+            // M4.5E.2 Gate B：开始时捕获目标会话，本次 operation（上下文/请求/持久化/渲染）
+            // 全程绑定它；await 之后绝不重读 CurrentDetailSessionId 判断结果归属。
+            var targetSessionId = CurrentDetailSessionId;
+            if (IsAnalyzing || targetSessionId is null)
             {
                 return;
             }
 
-            var session = _store.Load(SelectedRecent.Id);
+            var session = _store.Load(targetSessionId);
             if (session is null)
             {
                 AnalysisError = "会话不存在，无法分析。";
                 return;
             }
 
-            IsAnalyzing = true;
+            IsAnalyzing = true;                          // 全局并发守卫（当前只允许一个分析）
+            _activeAnalysisSessionId = targetSessionId;  // per-session 显示归属
+            OnPropertyChanged(nameof(IsCurrentDetailAnalyzing));
             AnalysisError = string.Empty;
+            var contextJson = string.Empty;
             try
             {
                 var summary = session.Summary ?? TelemetrySessionAnalyzer.Analyze(session);
@@ -722,6 +984,7 @@ namespace AIGeekTuner.ViewModels
                 var incidentEnvelope = _incidentStore.Load(session.Id);
                 var evidenceContext = DiagnosticEvidenceContextBuilder.Build(
                     telemetryContext, incidentEnvelope);
+                contextJson = JsonSerializer.Serialize(evidenceContext);
 
                 var sw = System.Diagnostics.Stopwatch.StartNew();
                 var run = await _analysisService.AnalyzeAsync(evidenceContext, CancellationToken.None);
@@ -729,15 +992,35 @@ namespace AIGeekTuner.ViewModels
 
                 if (!run.Success || run.Result is null)
                 {
-                    AnalysisError = $"AI 分析失败：{run.ErrorMessage}（请求 {run.RequestCount} 次）";
+                    // Gate J：失败只写给“仍在目标会话上”的可见界面，不污染其它 Detail。
+                    if (CurrentDetailSessionId == targetSessionId)
+                    {
+                        AnalysisError = $"AI 分析失败：{run.ErrorMessage}（请求 {run.RequestCount} 次）";
+                    }
                     return;
                 }
 
-                // Gate K：ContextJson = AI 实际收到的组合有界上下文（服务层裁剪后），
-                // 用于事后审计“AI 当时看到了什么”。
-                ApplyAnalysis(run.Result, run.ModelName, sw.ElapsedMilliseconds,
-                    run.EvidenceContextJson ?? JsonSerializer.Serialize(evidenceContext),
-                    session.Id, run.RepairUsed);
+                contextJson = run.EvidenceContextJson ?? contextJson;
+
+                // Gate D ①：持久化永远属于目标会话（analysis.json for A），与界面无关。
+                var saved = PersistAnalysis(targetSessionId, run.Result, run.ModelName,
+                    sw.ElapsedMilliseconds, contextJson, run.RepairUsed);
+
+                // Gate D ②：刷新历史元数据（“已分析”标记），无论当前 Detail 是谁。
+                LoadRecent();
+
+                // Gate D ③：只有用户仍在目标会话上才渲染到可见 Detail；
+                // 否则绝不碰当前 B 的 Summary/Findings/SpokenSummary——切回 A 时经 analysis.json 恢复。
+                if (CurrentDetailSessionId == targetSessionId)
+                {
+                    if (!saved)
+                    {
+                        AnalysisError = "分析结果已生成，但保存 analysis.json 失败。";
+                    }
+
+                    RenderAnalysis(run.Result, run.ModelName, sw.ElapsedMilliseconds,
+                        contextJson, targetSessionId);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -746,27 +1029,29 @@ namespace AIGeekTuner.ViewModels
             catch (Exception exception)
             {
                 Services.Diagnostics.ExceptionLogWriter.Write(exception, "Sessions analyze");
-                AnalysisError = "AI 分析失败：" + exception.Message;
+                if (CurrentDetailSessionId == targetSessionId)
+                {
+                    AnalysisError = "AI 分析失败：" + exception.Message;
+                }
             }
             finally
             {
                 IsAnalyzing = false;
+                _activeAnalysisSessionId = null;
+                OnPropertyChanged(nameof(IsCurrentDetailAnalyzing));
             }
         }
 
-        /// <summary>把 AI 结果渲染到界面；证据 ID 映射为可读文本（§30）。</summary>
-        /// <remarks>
-        /// Gate 0.2 Problem B 修复：分析成功即通过 store 落盘 analysis.json；
-        /// 保存失败不吞掉分析结果，仅记录异常（分析 UI 结果保持有效）。
-        /// </remarks>
-        private void ApplyAnalysis(
+        /// <summary>
+        /// M4.5E.2 Gate D：把 AI 结果渲染到“当前可见”的 Detail——调用方必须保证
+        /// CurrentDetailSessionId == sessionId。持久化由 PersistAnalysis 独立负责。
+        /// </summary>
+        private void RenderAnalysis(
             SessionAnalysisResult result,
             string modelName,
             long durationMs,
             string contextJson,
-            string sessionId,
-            bool repairUsed = false,
-            bool persist = true)
+            string sessionId)
         {
             AssessmentBadge = result.OverallAssessment.ToString();
             ConfidenceText = $"Confidence {result.Confidence * 100:0}%";
@@ -800,33 +1085,51 @@ namespace AIGeekTuner.ViewModels
 
             SpokenSummary = result.SpokenSummary;
             HasAnalysis = true;
+            _voiceFailureText = null;
             VoiceState = VoicePlaybackState.Idle;
-
-            // Gate 0.2 Problem B：成功分析必须持久化（session.json 不动，§24/§25）。
-            if (persist)
-            {
-                try
-                {
-                    _analysisStore.Save(new SessionAnalysisEnvelope(
-                        SchemaVersion: 1,
-                        SessionId: sessionId,
-                        AnalyzedAtUtc: DateTimeOffset.UtcNow,
-                        ModelName: modelName,
-                        DurationMs: durationMs,
-                        RepairUsed: repairUsed,
-                        Result: result,
-                        ContextJson: contextJson));
-                }
-                catch (Exception exception)
-                {
-                    Services.Diagnostics.ExceptionLogWriter.Write(exception, "SessionAnalysis save");
-                    AnalysisError = "分析结果已生成，但保存 analysis.json 失败。";
-                }
-            }
+            // V2-M4.5D Gate Q 回归修复：HasAnalysis/SpokenSummary 变化不经过
+            // VoiceState setter，RelayCommand 无 CommandManager 自动重查询——
+            // 必须显式刷新，否则播放按钮在分析完成后仍是禁用态（点击无反应）。
+            PlaySpokenSummaryCommand.NotifyCanExecuteChanged();
 
             // Gate H：ContextJson 记录了 AI 实际看到的组合上下文——
             // 据此标记哪些 incident 真正进入了 AI 分析（omitted 的不标）。
             RefreshIncidentAiMarkers(contextJson);
+
+            // V2-M4.5D：分析完成 → 自动预生成语音并按会话缓存（命中缓存则跳过）。
+            StartVoiceGenerationIfMissing();
+        }
+
+        /// <summary>
+        /// Gate D ①：持久化属于目标会话（analysis.json），与“当前 Detail 是谁”无关。
+        /// 保存失败只返回 false，由调用方决定是否展示（仅在用户仍看着目标会话时）。
+        /// </summary>
+        private bool PersistAnalysis(
+            string sessionId,
+            SessionAnalysisResult result,
+            string modelName,
+            long durationMs,
+            string contextJson,
+            bool repairUsed)
+        {
+            try
+            {
+                _analysisStore.Save(new SessionAnalysisEnvelope(
+                    SchemaVersion: 1,
+                    SessionId: sessionId,
+                    AnalyzedAtUtc: DateTimeOffset.UtcNow,
+                    ModelName: modelName,
+                    DurationMs: durationMs,
+                    RepairUsed: repairUsed,
+                    Result: result,
+                    ContextJson: contextJson));
+                return true;
+            }
+            catch (Exception exception)
+            {
+                Services.Diagnostics.ExceptionLogWriter.Write(exception, "SessionAnalysis save");
+                return false;
+            }
         }
 
         /// <summary>
@@ -858,16 +1161,98 @@ namespace AIGeekTuner.ViewModels
             return evidenceId;
         }
 
+        /// <summary>
+        /// M4.5E.2 Gate J：播放绑定发起时的目标会话。缓存命中直接播；
+        /// 用户中途切走时完成回调不污染当前 Detail、也不在别的会话页上突然出声。
+        /// </summary>
         public void PlaySpokenSummary()
         {
+            var sessionId = CurrentDetailSessionId;
             if (VoiceState is VoicePlaybackState.Generating or VoicePlaybackState.Playing
-                || string.IsNullOrWhiteSpace(SpokenSummary))
+                || string.IsNullOrWhiteSpace(SpokenSummary)
+                || sessionId is null)
             {
                 return;
             }
 
             var text = SpokenSummary;
             var configuration = _voiceSnapshot();
+            _activeVoiceSessionId = sessionId;
+            _voiceFailureText = null;
+            VoiceState = VoicePlaybackState.Generating;
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    // V2-M4.5D：会话级 voice.wav 缓存命中 → 不再重复调用 GPT-SoVITS
+                    //（M4.5E.2 Gate K-14：损坏/空文件按未命中处理，自动重新合成）。
+                    byte[]? wav = _analysisStore.TryLoadVoiceWav(sessionId);
+                    if (wav is null)
+                    {
+                        var result = await _voiceService.SynthesizeAsync(text, configuration, CancellationToken.None);
+                        if (!result.Succeeded || result.WavBytes is null)
+                        {
+                            if (CurrentDetailSessionId == sessionId)
+                            {
+                                ReportVoiceFailureOnTarget(sessionId, result.ErrorMessage ?? "语音合成失败。");
+                            }
+
+                            FinishVoiceOperation(sessionId, failed: true, failureText: "语音播放失败");
+                            return;
+                        }
+
+                        wav = result.WavBytes;
+                        _analysisStore.SaveVoiceWav(sessionId, wav);
+                    }
+
+                    // Gate J：只有用户仍停留在发起会话上才真正出声。
+                    // M4.5E.3 Gate E：VoiceState 必须经捕获的 UI 上下文变更——后台线程直接
+                    // set_VoiceState 会同步触发 CanExecuteChanged（VerifyAccess 异常），
+                    // 且发生在 PlayWav 之前 → 无声无报错（E.2 播放回归根因）。
+                    if (CurrentDetailSessionId == sessionId)
+                    {
+                        RunOnUiThread(() => VoiceState = VoicePlaybackState.Playing);
+                        _wavPlayback.PlayWav(wav);
+                    }
+
+                    FinishVoiceOperation(sessionId, failed: false);
+                }
+                catch (Exception exception)
+                {
+                    Services.Diagnostics.ExceptionLogWriter.Write(exception, "Sessions voice playback");
+                    if (CurrentDetailSessionId == sessionId)
+                    {
+                        ReportVoiceFailureOnTarget(sessionId, exception.Message);
+                    }
+
+                    FinishVoiceOperation(sessionId, failed: true, failureText: "语音播放失败");
+                }
+            });
+        }
+
+        /// <summary>
+        /// M4.5E.2 Gate J：语音预生成绑定发起时的目标会话（只对可见会话发起）；
+        /// 完成回调只影响目标会话的显示——用户已切走时绝不污染当前 Detail。
+        /// </summary>
+        private void StartVoiceGenerationIfMissing()
+        {
+            var sessionId = CurrentDetailSessionId;
+            if (string.IsNullOrWhiteSpace(SpokenSummary)
+                || VoiceState is VoicePlaybackState.Generating or VoicePlaybackState.Playing
+                || sessionId is null
+                || _analysisStore.HasCachedVoice(sessionId))
+            {
+                return;
+            }
+
+            var text = SpokenSummary;
+            var configuration = _voiceSnapshot();
+            if (string.IsNullOrWhiteSpace(configuration.Endpoint))
+            {
+                return;
+            }
+
+            _activeVoiceSessionId = sessionId;
             VoiceState = VoicePlaybackState.Generating;
             _ = Task.Run(async () =>
             {
@@ -876,37 +1261,102 @@ namespace AIGeekTuner.ViewModels
                     var result = await _voiceService.SynthesizeAsync(text, configuration, CancellationToken.None);
                     if (!result.Succeeded || result.WavBytes is null)
                     {
-                        await Application.Current.Dispatcher.InvokeAsync(() =>
-                        {
-                            VoiceState = VoicePlaybackState.Error;
-                            ErrorText = result.ErrorMessage ?? "语音合成失败。";
-                            HasError = true;
-                        });
+                        FinishVoiceOperation(
+                            sessionId, failed: true, failureText: "语音预生成失败，播放时会重试");
                         return;
                     }
 
-                    var cacheDir = Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "AI-GeekTuner", "VoiceCache");
-                    Directory.CreateDirectory(cacheDir);
-                    var wavPath = Path.Combine(cacheDir, "spoken-summary.wav");
-                    File.WriteAllBytes(wavPath, result.WavBytes);
-
-                    await Application.Current.Dispatcher.InvokeAsync(() => VoiceState = VoicePlaybackState.Playing);
-                    _wavPlayback.PlayWav(result.WavBytes);
-                    await Application.Current.Dispatcher.InvokeAsync(() => VoiceState = VoicePlaybackState.Idle);
+                    // Gate G：缓存先落盘（磁盘是事实源），再结束操作状态——
+                    // 完成后 VoiceStateText 按缓存事实自动显示“已生成”。
+                    _analysisStore.SaveVoiceWav(sessionId, result.WavBytes);
+                    FinishVoiceOperation(sessionId, failed: false);
                 }
                 catch (Exception exception)
                 {
-                    await Application.Current.Dispatcher.InvokeAsync(() =>
-                    {
-                        VoiceState = VoicePlaybackState.Error;
-                        ErrorText = exception.Message;
-                        HasError = true;
-                    });
+                    Services.Diagnostics.ExceptionLogWriter.Write(exception, "Sessions voice pregenerate");
+                    FinishVoiceOperation(
+                        sessionId, failed: true, failureText: "语音预生成失败，播放时会重试");
                 }
             });
         }
+
+        /// <summary>
+        /// M4.5E.3 Gate E：后台语音线程的唯一 UI 状态回写通道。使用构造时捕获的
+        /// SynchronizationContext；无捕获上下文或已在同一上下文 → 内联执行
+        /// （单元测试 / 无 WPF 宿主）。绝不依赖 Application.Current。
+        /// </summary>
+        private void RunOnUiThread(Action action)
+        {
+            var context = _uiSynchronizationContext;
+            if (context is null || Environment.CurrentManagedThreadId == _uiThreadId)
+            {
+                action();
+                return;
+            }
+
+            context.Post(static state =>
+            {
+                try
+                {
+                    ((Action)state!).Invoke();
+                }
+                catch (Exception exception)
+                {
+                    // Post 回调逃逸异常会变成 UI 线程未处理异常——留痕即可。
+                    Services.Diagnostics.ExceptionLogWriter.Write(exception, "Sessions voice UI state");
+                }
+            }, action);
+        }
+
+        /// <summary>
+        /// M4.5E.3 Gate F：失败只对仍在目标会话上的用户可见——ErrorText 承载技术细节，
+        /// 简短用户文案由 VoiceStateText（_voiceFailureText）呈现。
+        /// </summary>
+        private void ReportVoiceFailureOnTarget(string sessionId, string technicalMessage)
+        {
+            RunOnUiThread(() =>
+            {
+                if (CurrentDetailSessionId == sessionId)
+                {
+                    ErrorText = technicalMessage;
+                    HasError = true;
+                }
+            });
+        }
+
+        /// <summary>
+        /// 结束一次语音操作：清除 per-session 忙标记；失败只对仍在目标会话上的用户可见。
+        /// M4.5E.3 Gate E：本方法从后台语音线程调用，所有状态变更经 RunOnUiThread 回到
+        /// UI 上下文——后台线程直接 set_VoiceState 会同步触发 CanExecuteChanged 的
+        /// VerifyAccess 异常（真机日志实锤的播放无声回归根因，禁止改回）。
+        /// </summary>
+        private void FinishVoiceOperation(string sessionId, bool failed, string? failureText = null)
+        {
+            RunOnUiThread(() =>
+            {
+                _activeVoiceSessionId = null;
+                if (CurrentDetailSessionId == sessionId)
+                {
+                    if (failed)
+                    {
+                        _voiceFailureText = failureText ?? "语音预生成失败，播放时会重试";
+                        VoiceState = VoicePlaybackState.Error;
+                    }
+                    else
+                    {
+                        _voiceFailureText = null;
+                        VoiceState = VoicePlaybackState.Idle;
+                    }
+                }
+                else
+                {
+                    // 用户在其它会话上：全局操作状态归位，但当前 Detail 的显示不被触碰。
+                    _voiceFailureText = null;
+                    VoiceState = VoicePlaybackState.Idle;
+                }
+            });
+        }
+
 
         private void SyncFromRecorder()
         {

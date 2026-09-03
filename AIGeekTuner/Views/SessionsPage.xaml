@@ -19,6 +19,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Margin="0,0,0,16">
@@ -27,69 +28,137 @@
                            Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
 
-            <!-- 空态 -->
-            <Border Grid.Row="1" Style="{StaticResource CardStyle}"
-                    Visibility="{Binding HasEmptyState, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <TextBlock Text="诊断录制" Foreground="#ECFAFF" FontSize="15" FontWeight="SemiBold"/>
-                    <TextBlock Text="记录一段硬件运行状态，用于分析温度、负载、频率和数据源变化。"
-                               Foreground="#A9D9E9" FontSize="11" Margin="0,4,0,10"/>
-                    <Button Content="开始录制" Command="{Binding StartRecordingCommand}"
-                            Style="{StaticResource TechButtonStyle}" Padding="20,9" MinWidth="140"
-                            HorizontalAlignment="Left"/>
+            <!-- V2-M4.5E Gate C：常驻紧凑操作栏——任何状态下都能离开当前视图，用户不会被围住 -->
+            <Border Grid.Row="1" Background="#0DFFFFFF" Padding="12,8" Margin="0,0,0,12"
+                    CornerRadius="4">
+                <StackPanel Orientation="Horizontal">
+                    <!-- 录制中文案自动变为“返回当前录制”（Gate I），只切视图不二次启动 -->
+                    <Button Content="{Binding NewRecordingButtonText}"
+                            Command="{Binding OpenRecordViewCommand}"
+                            Style="{StaticResource TechButtonStyle}" Padding="16,7" MinWidth="120"
+                            Margin="0,0,10,0"/>
+                    <Button Content="历史记录"
+                            Command="{Binding OpenHistoryViewCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}" Padding="16,7" MinWidth="100"/>
                 </StackPanel>
             </Border>
 
-            <!-- 录制中 -->
-            <Border Grid.Row="2" Style="{StaticResource CardStyle}"
-                    Visibility="{Binding IsRecording, Converter={StaticResource BoolToVis}}">
-                <StackPanel>
-                    <Grid Margin="0,0,0,8">
-                        <StackPanel Orientation="Horizontal">
-                            <Ellipse Width="10" Height="10" Fill="#FF6B6B" VerticalAlignment="Center"/>
-                            <TextBlock Text="正在录制" Foreground="#ECFAFF" FontSize="15"
-                                       FontWeight="SemiBold" Margin="8,0,0,0"/>
-                            <TextBlock Text="{Binding ElapsedText}" Foreground="#FFE08A" FontSize="15"
-                                       FontWeight="SemiBold" Margin="12,0,0,0"/>
-                        </StackPanel>
-                        <Button Content="停止并分析" Command="{Binding StopAndAnalyzeCommand}"
-                                Style="{StaticResource TechButtonStyle}" Padding="16,7"
-                                HorizontalAlignment="Right"/>
-                    </Grid>
-                    <TextBlock Foreground="#A9D9E9" FontSize="11">
-                        <Run Text="Samples: "/><Run Text="{Binding SamplesText, Mode=OneWay}"/>
-                        <Run Text="    Interval: "/><Run Text="{Binding IntervalText, Mode=OneWay}"/>
-                    </TextBlock>
-                    <ItemsControl ItemsSource="{Binding LiveMetrics}" Margin="0,10,0,0">
-                        <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                                <Grid Margin="0,3">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*"/>
-                                        <ColumnDefinition Width="110"/>
-                                        <ColumnDefinition Width="110"/>
-                                        <ColumnDefinition Width="110"/>
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding Label}" Foreground="#B4DEEB" FontSize="11"/>
-                                    <TextBlock Grid.Column="1" Text="{Binding Current}" Foreground="White" FontSize="12" FontWeight="SemiBold"/>
-                                    <TextBlock Grid.Column="2" Text="{Binding Min}" Foreground="#9FC6DA" FontSize="11"/>
-                                    <TextBlock Grid.Column="3" Text="{Binding Max}" Foreground="#9FC6DA" FontSize="11"/>
-                                </Grid>
-                            </DataTemplate>
-                        </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                </StackPanel>
-            </Border>
-
-            <!-- 错误 -->
-            <Border Grid.Row="3" Background="#33FF6B6B" Padding="12,8" Margin="0,0,0,12"
+            <!-- 错误（任何视图都可见） -->
+            <Border Grid.Row="2" Background="#33FF6B6B" Padding="12,8" Margin="0,0,0,12"
                     Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}">
                 <TextBlock Text="{Binding ErrorText}" Foreground="#FFD1D1" FontSize="11" TextWrapping="Wrap"/>
             </Border>
 
-            <!-- 摘要：遥测确定性事实 → Windows 事件证据 → AI 分析 → 语音摘要（V2-M4.4 顺序） -->
-            <StackPanel Grid.Row="4"
-                        Visibility="{Binding HasResult, Converter={StaticResource BoolToVis}}">
+            <!-- ============ Record 视图（Gate D）：未录制 → 开始入口；录制中 → 现有录制卡片 ============ -->
+            <StackPanel Grid.Row="3" Visibility="{Binding IsRecordMode, Converter={StaticResource BoolToVis}}">
+                <!-- 未录制 -->
+                <Border Style="{StaticResource CardStyle}"
+                        Visibility="{Binding HasEmptyState, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <TextBlock Text="诊断录制" Foreground="#ECFAFF" FontSize="15" FontWeight="SemiBold"/>
+                        <TextBlock Text="记录一段硬件运行状态，用于分析温度、负载、频率和数据源变化。"
+                                   Foreground="#A9D9E9" FontSize="11" Margin="0,4,0,10"/>
+                        <Button Content="开始录制" Command="{Binding StartRecordingCommand}"
+                                Style="{StaticResource TechButtonStyle}" Padding="20,9" MinWidth="140"
+                                HorizontalAlignment="Left"/>
+                    </StackPanel>
+                </Border>
+
+                <!-- 录制中（内容不变：时长 / samples / current readings / 停止并分析） -->
+                <Border Style="{StaticResource CardStyle}"
+                        Visibility="{Binding IsRecording, Converter={StaticResource BoolToVis}}">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,8">
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="10" Height="10" Fill="#FF6B6B" VerticalAlignment="Center"/>
+                                <TextBlock Text="正在录制" Foreground="#ECFAFF" FontSize="15"
+                                           FontWeight="SemiBold" Margin="8,0,0,0"/>
+                                <TextBlock Text="{Binding ElapsedText}" Foreground="#FFE08A" FontSize="15"
+                                           FontWeight="SemiBold" Margin="12,0,0,0"/>
+                            </StackPanel>
+                            <Button Content="停止并分析" Command="{Binding StopAndAnalyzeCommand}"
+                                    Style="{StaticResource TechButtonStyle}" Padding="16,7"
+                                    HorizontalAlignment="Right"/>
+                        </Grid>
+                        <TextBlock Foreground="#A9D9E9" FontSize="11">
+                            <Run Text="Samples: "/><Run Text="{Binding SamplesText, Mode=OneWay}"/>
+                            <Run Text="    Interval: "/><Run Text="{Binding IntervalText, Mode=OneWay}"/>
+                        </TextBlock>
+                        <ItemsControl ItemsSource="{Binding LiveMetrics}" Margin="0,10,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="110"/>
+                                            <ColumnDefinition Width="110"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Label}" Foreground="#B4DEEB" FontSize="11"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Current}" Foreground="White" FontSize="12" FontWeight="SemiBold"/>
+                                        <TextBlock Grid.Column="2" Text="{Binding Min}" Foreground="#9FC6DA" FontSize="11"/>
+                                        <TextBlock Grid.Column="3" Text="{Binding Max}" Foreground="#9FC6DA" FontSize="11"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- ============ History 视图（Gate E）：独立可进入，只读已保存会话 ============ -->
+            <StackPanel Grid.Row="4" Visibility="{Binding IsHistoryMode, Converter={StaticResource BoolToVis}}">
+                <Border Style="{StaticResource CardStyle}">
+                    <StackPanel>
+                        <TextBlock Text="录制历史" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,6"/>
+                        <TextBlock Text="暂无录制历史" Foreground="#A9D9E9" FontSize="11" Margin="0,2,0,0"
+                                   Visibility="{Binding HasNoHistory, Converter={StaticResource BoolToVis}}"/>
+                        <ListBox ItemsSource="{Binding RecentSessions}"
+                                 SelectedItem="{Binding SelectedRecent, Mode=TwoWay}"
+                                 Background="Transparent" BorderThickness="0"
+                                 Foreground="#ECFAFF" MaxHeight="360">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding StartedText}" Width="140" FontSize="11"/>
+                                        <TextBlock Text="{Binding DurationText}" Width="80" FontSize="11" Foreground="#A9D9E9"/>
+                                        <TextBlock Text="{Binding SampleCount, StringFormat={}{0} samples}" Width="100" FontSize="11" Foreground="#A9D9E9"/>
+                                        <!-- M4.5E.1 补充：AI 分析完成状态（完成标记，非健康判断） -->
+                                        <TextBlock Text="{Binding AnalysisStateText}" FontSize="11" Margin="12,0,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="#6FA7BC"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsAnalyzed}" Value="True">
+                                                            <Setter Property="Foreground" Value="#9FD9EA"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Content="查看详情" Command="{Binding SelectRecentCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,10,0"/>
+                            <Button Content="删除所选" Command="{Binding DeleteRecentCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" Padding="12,6"/>
+                        </StackPanel>
+                        <TextBlock Text="浏览历史只读取已保存的会话文件，不会重新查询事件日志或重新运行 AI 分析。"
+                                   Foreground="#6FA7BC" FontSize="10" Margin="0,8,0,0"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- ============ Detail 视图（Gate F）：既有摘要内容 ============
+                  M4.5E.1 Problem A：Detail 内部不再设任何导航/动作按钮——
+                  Record / History / Detail 的模式切换唯一依赖页头
+                  [新建录制(录制中=返回当前录制)] [历史记录]，不重复、不新增第三套导航。 ============ -->
+            <StackPanel Grid.Row="5" Visibility="{Binding IsDetailMode, Converter={StaticResource BoolToVis}}">
+
+                <!-- 摘要：遥测确定性事实 → Windows 事件证据 → AI 分析 → 语音摘要（V2-M4.4 顺序，内容不变） -->
                 <Border Style="{StaticResource CardStyle}">
                     <StackPanel>
                         <TextBlock Text="Session Summary · 统计" Style="{StaticResource SectionTitleStyle}"/>
@@ -183,8 +252,9 @@
                                     Padding="12,6" HorizontalAlignment="Right"/>
                         </Grid>
                         <TextBlock Text="{Binding IsAnalyzing}" Visibility="Collapsed"/>
+                        <!-- M4.5E.2 Gate C：分析中提示按会话隔离（IsCurrentDetailAnalyzing），全局 IsAnalyzing 只作并发守卫 -->
                         <TextBlock Text="正在分析录制结果…" Foreground="#FFE08A" FontSize="11"
-                                   Visibility="{Binding IsAnalyzing, Converter={StaticResource BoolToVis}}"/>
+                                   Visibility="{Binding IsCurrentDetailAnalyzing, Converter={StaticResource BoolToVis}}"/>
                         <TextBlock Text="{Binding AnalysisError}" Foreground="#FFD1D1" FontSize="11" TextWrapping="Wrap"
                                    Visibility="{Binding HasError, Converter={StaticResource BoolToVis}}"/>
 
@@ -248,32 +318,6 @@
                                 Style="{StaticResource SecondaryButtonStyle}" Padding="14,6"
                                 HorizontalAlignment="Left"/>
                         <TextBlock Text="{Binding VoiceStateText}" Foreground="#A9D9E9" FontSize="10" Margin="0,6,0,0"/>
-                    </StackPanel>
-                </Border>
-
-                <Border Style="{StaticResource CardStyle}">
-                    <StackPanel>
-                        <TextBlock Text="最近录制" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,6"/>
-                        <ListBox ItemsSource="{Binding RecentSessions}"
-                                 SelectedItem="{Binding SelectedRecent, Mode=TwoWay}"
-                                 Background="Transparent" BorderThickness="0"
-                                 Foreground="#ECFAFF" MaxHeight="180">
-                            <ListBox.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="{Binding StartedText}" Width="140" FontSize="11"/>
-                                        <TextBlock Text="{Binding DurationText}" Width="80" FontSize="11" Foreground="#A9D9E9"/>
-                                        <TextBlock Text="{Binding SampleCount, StringFormat={}{0} samples}" FontSize="11" Foreground="#A9D9E9"/>
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListBox.ItemTemplate>
-                        </ListBox>
-                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                            <Button Content="载入所选摘要" Command="{Binding SelectRecentCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}" Padding="12,6" Margin="0,0,10,0"/>
-                            <Button Content="删除所选" Command="{Binding DeleteRecentCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}" Padding="12,6"/>
-                        </StackPanel>
                     </StackPanel>
                 </Border>
             </StackPanel>

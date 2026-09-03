@@ -25,7 +25,17 @@ namespace AIGeekTuner.Views
                     viewModel.RefreshLive();
                 }
             };
-            Loaded += (_, _) => _uiTimer.Start();
+            Loaded += (_, _) =>
+            {
+                _uiTimer.Start();
+                // V2-M4.5E Gate H：每次回到 Sessions 页应用入口规则
+                //（录制中 → Record 视图；未录制 → 保留最近模式）。ViewModel 单例，
+                // 页面实例可被重建，入口规则必须挂在页面上而不是构造器里。
+                if (DataContext is SessionsViewModel enteredViewModel)
+                {
+                    enteredViewModel.OnPageEntered();
+                }
+            };
             Unloaded += (_, _) => _uiTimer.Stop();
 
             if (DataContext is SessionsViewModel vm)

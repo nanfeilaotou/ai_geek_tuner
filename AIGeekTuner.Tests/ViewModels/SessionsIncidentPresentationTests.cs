@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models.Incidents;
@@ -37,7 +38,7 @@ namespace AIGeekTuner.Tests.ViewModels
 
         private sealed class FakeSettingsService : IApplicationSettingsService
         {
-            public ApplicationSettings Current { get; private set; } = new();
+            public ApplicationSettings Current { get; set; } = new();
             public void Load(ApplicationSettings settings) => Current = settings;
             public Task SaveAsync(ApplicationSettings settings, CancellationToken cancellationToken = default) =>
                 Task.CompletedTask;
@@ -113,6 +114,144 @@ namespace AIGeekTuner.Tests.ViewModels
             viewModel.SelectedRecent =
                 viewModel.RecentSessions.First(item => item.Id == sessionId);
             viewModel.SelectRecentCommand.Execute(null);
+        }
+
+        private sealed class RecordingHub : ITelemetryHub
+        {
+            public Task<TelemetrySnapshot> ReadAsync(CancellationToken cancellationToken = default) =>
+                Task.FromResult(TelemetrySnapshot.Empty(DateTimeOffset.UtcNow));
+        }
+
+        private sealed class WorkingIncidentCorrelation : ISessionIncidentCorrelationService
+        {
+            public Task<SessionIncidentEnvelope> CaptureAsync(
+                TelemetryRecordingSession session, CancellationToken cancellationToken = default) =>
+                Task.FromResult(SessionIncidentStoreTests.MakeEnvelope(session.Id));
+        }
+
+        /// <summary>
+        /// V2-M4.5D Gate Q 回归 + M4.5E.1 语义更新：录制结束必须自动进入刚完成会话的
+        /// Detail（CurrentDetailSessionId = 新会话），分析按钮以其为准真正可执行。
+        /// </summary>
+        [Fact]
+        public async Task StopAndAnalyze_ShowsDetailOfNewSession_AnalyzeCommandActuallyRuns()
+        {
+            var settings = new FakeSettingsService();
+            settings.Current = new ApplicationSettings { RecordingIntervalMs = 200 };
+            var store = new TelemetrySessionStore(_temp.FullPath);
+            var viewModel = new SessionsViewModel(
+                // 与生产 composition root 一致：recorder 与 VM 共用同一 store，
+                // 否则 StopAsync 不落盘，LoadRecent 读不到任何会话。
+                new TelemetryRecordingService(new RecordingHub(), store),
+                store,
+                settings,
+                new FakeAnalysisService(),
+                new SessionAnalysisStore(_temp.FullPath),
+                new FakeVoiceService(),
+                new FakeWavPlayback(),
+                () => new VoiceConfiguration("http://localhost:9880", "", "", "", "zh", 1.0, null, null),
+                new WorkingIncidentCorrelation(),
+                new SessionIncidentStore(_temp.FullPath));
+
+            viewModel.StartRecordingCommand.Execute(null);
+            Assert.True(viewModel.IsRecording);
+            await Task.Delay(700);   // 200ms 间隔 → 若干真实采样
+            await viewModel.StopAndAnalyzeCommand.ExecuteAsync();
+
+            // 回归锁 1：Detail 展示的就是刚完成的新会话（M4.5E.1：不再依赖列表选择）。
+            Assert.NotNull(viewModel.CurrentDetailSessionId);
+            Assert.True(viewModel.RecentSessions[0].SampleCount > 0);
+            // 回归锁 2：分析按钮真正可执行（不再以可用外观静默 no-op）。
+            Assert.True(viewModel.AnalyzeCommand.CanExecute(null));
+
+            // 回归锁 3：AnalyzeAsync 真正跑过分析路径——FakeAnalysisService 返回失败，
+            // 若执行过则 AnalysisError 被赋值；静默 return 时它保持空。
+            await viewModel.AnalyzeCommand.ExecuteAsync();
+            Assert.Contains("AI 分析失败", viewModel.AnalysisError);
+        }
+
+        private sealed class SuccessAnalysisService : ISessionAnalysisService
+        {
+            public Task<SessionAnalysisRun> AnalyzeAsync(DiagnosticEvidenceContext context, CancellationToken cancellationToken) =>
+                Task.FromResult(new SessionAnalysisRun(
+                    true,
+                    new SessionAnalysisResult(
+                        "总体正常",
+                        SessionOverallAssessment.Normal,
+                        0.9,
+                        Array.Empty<SessionFinding>(),
+                        Array.Empty<SessionRecommendation>(),
+                        Array.Empty<string>(),
+                        "语音摘要测试文本"),
+                    null,
+                    Array.Empty<string>(),
+                    1,
+                    TimeSpan.FromSeconds(1),
+                    "test-model",
+                    false,
+                    "{}"));
+        }
+
+        private sealed class CountingVoiceService : IVoiceSynthesisService
+        {
+            public int Calls { get; private set; }
+
+            public Task<VoiceSynthesisResult> SynthesizeAsync(
+                string text, VoiceConfiguration configuration, CancellationToken cancellationToken)
+            {
+                Calls++;
+                return Task.FromResult(VoiceSynthesisResult.Ok(TestWav.Create()));
+            }
+        }
+
+        /// <summary>
+        /// V2-M4.5D：分析成功 → 自动预生成语音并写入 Sessions/{id}/voice.wav；
+        /// 再次播放命中缓存，不再调用 GPT-SoVITS（用户需求：自动生成并保存）。
+        /// </summary>
+        [Fact]
+        public async Task AnalyzeSuccess_AutoGeneratesVoiceWav_PlayReusesCache()
+        {
+            var settings = new FakeSettingsService();
+            settings.Current = new ApplicationSettings { RecordingIntervalMs = 200 };
+            var store = new TelemetrySessionStore(_temp.FullPath);
+            var analysisStore = new SessionAnalysisStore(_temp.FullPath);
+            var voice = new CountingVoiceService();
+            var viewModel = new SessionsViewModel(
+                new TelemetryRecordingService(new RecordingHub(), store),
+                store,
+                settings,
+                new SuccessAnalysisService(),
+                analysisStore,
+                voice,
+                new FakeWavPlayback(),
+                () => new VoiceConfiguration("http://127.0.0.1:9880", "ref.wav", "p", "zh", "zh", 1.0, null, null),
+                new WorkingIncidentCorrelation(),
+                new SessionIncidentStore(_temp.FullPath));
+
+            viewModel.StartRecordingCommand.Execute(null);
+            await Task.Delay(700);
+            await viewModel.StopAndAnalyzeCommand.ExecuteAsync();
+            await viewModel.AnalyzeCommand.ExecuteAsync();
+
+            // 自动预生成：分析完成后 voice.wav 自动落盘。
+            var sessionId = viewModel.CurrentDetailSessionId!;
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!analysisStore.VoiceWavExists(sessionId) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(100);
+            }
+            Assert.True(analysisStore.VoiceWavExists(sessionId));
+            Assert.Equal(1, voice.Calls);   // 预生成恰好调用一次合成
+
+            // 播放：命中会话级缓存 → 不再新增合成调用。
+            viewModel.PlaySpokenSummaryCommand.Execute(null);
+            var deadline2 = DateTime.UtcNow.AddSeconds(10);
+            while (viewModel.VoiceState == SessionsViewModel.VoicePlaybackState.Playing
+                && DateTime.UtcNow < deadline2)
+            {
+                await Task.Delay(100);
+            }
+            Assert.Equal(1, voice.Calls);
         }
 
         [Fact]
