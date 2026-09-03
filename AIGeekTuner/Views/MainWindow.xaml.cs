@@ -4,6 +4,10 @@ using System.Windows.Controls;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
 using AIGeekTuner.Services.AI;
+using AIGeekTuner.Services.AI.Providers;
+using AIGeekTuner.Services.AI.Providers.Configuration;
+using AIGeekTuner.Services.AI.Providers.Credentials;
+using AIGeekTuner.Services.AI.Providers.Transport;
 using AIGeekTuner.Services.Diagnosis;
 using AIGeekTuner.Services.Dialogs;
 using AIGeekTuner.Services.Files;
@@ -130,12 +134,36 @@ namespace AIGeekTuner
                 () => ConfigurationStore.Snapshot().Ollama,
                 new DiagnosticResultParser());
             _connectionService = new OllamaConnectionService(_httpClient);
+
+            // V2-M5.1A：Provider Foundation 服务栈——目前只被设置页的 Provider 卡片使用；
+            // 诊断 / Session AI 仍走上面的旧 Ollama runtime，M5.1B 才做运行时切换。
+            // 凭据“是否存在”通过委托暴露给 ViewModel，明文不进入 UI 层。
+            var providerCredentialStore = new WindowsDpapiCredentialStore(
+                applicationDataPaths.AiCredentialsFilePath);
+            var aiProviderStore = new AiProviderProfileStore(
+                applicationDataPaths.AiProvidersFilePath,
+                new OllamaOptions
+                {
+                    BaseUrl = _applicationSettingsService.Current.OllamaBaseUrl,
+                    ModelName = _applicationSettingsService.Current.OllamaModelName
+                });
+            var aiProviderManager = new AiProviderManager(
+                aiProviderStore,
+                providerCredentialStore,
+                new OpenAiCompatibleClient(_httpClient),
+                new OllamaNativeClient(_httpClient));
+            var aiProviderSettingsViewModel = new AiProviderSettingsViewModel(
+                aiProviderManager,
+                _confirmationDialogService,
+                async providerId => await providerCredentialStore.LoadAsync(providerId) is not null);
+
             _settingsViewModel = new SettingsViewModel(
                 _applicationSettingsService,
                 _connectionService,
                 ConfigurationStore,
                 _localDataDirectoryService,
-                _telemetryHub);
+                _telemetryHub,
+                aiProviderSettingsViewModel);
             _liveTelemetryCoordinator = liveTelemetry;
             // V2-M3：Session AI（复用现有 HttpClient 与配置快照原则）+ GPT-SoVITS。
             // 注意：须在 ConfigurationStore/_applicationSettingsService 赋值之后创建，

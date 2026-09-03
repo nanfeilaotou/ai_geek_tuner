@@ -58,13 +58,17 @@ namespace AIGeekTuner.ViewModels
             IOllamaConnectionService connectionService,
             DiagnosticConfigurationStore configurationStore,
             ILocalDataDirectoryService localDataDirectoryService,
-            ITelemetryHub? telemetryHub = null)
+            ITelemetryHub? telemetryHub = null,
+            AiProviderSettingsViewModel? providers = null)
         {
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
             _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
             _localDataDirectoryService = localDataDirectoryService ?? throw new ArgumentNullException(nameof(localDataDirectoryService));
             _telemetryHub = telemetryHub;
+
+            // V2-M5.1A：Provider 配置卡片（独立于旧 Ollama runtime 设置；未注入时降级展示）。
+            Providers = providers ?? AiProviderSettingsViewModel.CreateUnavailable();
 
             var current = settingsService.Current;
             _baseUrl = current.OllamaBaseUrl;
@@ -99,6 +103,9 @@ namespace AIGeekTuner.ViewModels
 
         /// <summary>硬件数据源状态（V2-M1：只读展示 + 刷新检测，无可配置项）。</summary>
         public ObservableCollection<TelemetrySourceStatusViewModel> DataSourceStatuses { get; } = [];
+
+        /// <summary>V2-M5.1A：AI 服务提供方卡片（Provider 配置，独立于旧 Ollama runtime）。</summary>
+        public AiProviderSettingsViewModel Providers { get; }
 
         public ICommand RefreshDataSourcesCommand => _refreshDataSourcesCommand;
 

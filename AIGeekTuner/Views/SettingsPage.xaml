@@ -3,6 +3,8 @@
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       Title="SettingsPage" Background="Transparent">
     <Page.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibilityConverter"/>
+
         <Style x:Key="SettingsCardStyle" TargetType="Border"
                BasedOn="{StaticResource ToolCardStyle}">
             <Setter Property="Padding" Value="20"/>
@@ -203,6 +205,7 @@
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
             <StackPanel Grid.Row="0" Margin="0,0,0,20">
@@ -216,7 +219,9 @@
                 <StackPanel>
                     <TextBlock Text="AI 服务" Style="{StaticResource SectionTitleStyle}"/>
                     <TextBlock Text="本机或局域网 Ollama 服务地址与模型选择"
-                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,10"/>
+                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,4"/>
+                    <TextBlock Text="当前 AI 诊断仍使用此 Ollama 配置；新的 Provider 配置将在后续运行时切换功能接入后生效。"
+                               Style="{StaticResource SettingsHintStyle}" Margin="0,0,0,10"/>
 
                     <Border Style="{StaticResource SettingsRowStyle}">
                         <Grid>
@@ -277,8 +282,245 @@
                 </StackPanel>
             </Border>
 
-            <!-- 02 诊断偏好 -->
+            <!-- 02 AI 服务提供方（V2-M5.1A：Provider 配置；运行时切换在 M5.1B 接入） -->
             <Border Grid.Row="2" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
+                <StackPanel>
+                    <TextBlock Text="AI 服务提供方" Style="{StaticResource SectionTitleStyle}"/>
+                    <TextBlock Text="用于配置和测试新的多 Provider 架构；当前不会改变已有诊断任务使用的模型。"
+                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,10"/>
+
+                    <StackPanel IsEnabled="{Binding Providers.IsAvailable}">
+                        <!-- 选择 / 添加 / 删除 -->
+                        <Border Style="{StaticResource SettingsRowStyle}">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="当前编辑" Style="{StaticResource InfoLabelStyle}"/>
+                                <ComboBox Grid.Column="1"
+                                          Style="{StaticResource ModelComboStyle}"
+                                          IsEditable="False"
+                                          ItemsSource="{Binding Providers.SelectorItems}"
+                                          SelectedItem="{Binding Providers.SelectedItem}"
+                                          DisplayMemberPath="Label"
+                                          Margin="0,0,10,0"/>
+                                <TextBlock Grid.Column="2" Text="有未保存更改"
+                                           Foreground="#FFE08A" FontSize="12"
+                                           VerticalAlignment="Center" Margin="0,0,10,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding Providers.HasUnsavedChanges}" Value="True">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <Button Grid.Column="3" Content="删除 Provider"
+                                        Command="{Binding Providers.DeleteProviderCommand}"
+                                        IsEnabled="{Binding Providers.HasSelection}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="14,7"/>
+                            </Grid>
+                        </Border>
+
+                        <Border Padding="0,4,0,0"
+                                IsEnabled="{Binding Providers.HasSelection}">
+                        <StackPanel>
+                            <Border Style="{StaticResource SettingsRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="提供方名称" Style="{StaticResource InfoLabelStyle}"/>
+                                    <TextBox Grid.Column="1"
+                                             Style="{StaticResource SettingsInputStyle}"
+                                             Text="{Binding Providers.DisplayName, UpdateSourceTrigger=PropertyChanged}"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="类型" Style="{StaticResource InfoLabelStyle}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Providers.KindDisplay}"
+                                               Style="{StaticResource SettingsValueStyle}"
+                                               ToolTip="Provider 协议类型；新 Provider 的 ID 在下方“高级设置”中查看。"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="API 地址" Style="{StaticResource InfoLabelStyle}"/>
+                                    <TextBox Grid.Column="1"
+                                             Style="{StaticResource SettingsInputStyle}"
+                                             Text="{Binding Providers.BaseUrl, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="API 根地址，例如 http://127.0.0.1:11434 或 http://127.0.0.1:1234/v1"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsRowStyle}">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="API Key" Style="{StaticResource InfoLabelStyle}"/>
+                                        <TextBlock Grid.Column="1" Text="{Binding Providers.CredentialStatusText}"
+                                                   Style="{StaticResource SettingsHintStyle}"
+                                                   VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                        <Button Grid.Column="2" Content="更新密钥"
+                                                Command="{Binding Providers.BeginKeyUpdateCommand}"
+                                                Click="ProviderBeginKeyUpdate_Click"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Padding="12,6" Margin="0,0,8,0"/>
+                                        <Button Grid.Column="3" Content="清除"
+                                                Command="{Binding Providers.ClearKeyCommand}"
+                                                Style="{StaticResource SecondaryButtonStyle}"
+                                                Padding="12,6"/>
+                                    </Grid>
+                                    <PasswordBox x:Name="ProviderApiKeyBox"
+                                                 Background="#A62678A3" Foreground="#F4FCFF"
+                                                 CaretBrush="White" BorderBrush="#48B8E6F5"
+                                                 BorderThickness="1" Padding="8,5" MinHeight="34"
+                                                 Margin="150,8,0,0"
+                                                 Visibility="{Binding Providers.IsKeyEditorVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                 PasswordChanged="ProviderApiKey_PasswordChanged"/>
+                                    <TextBlock Text="已保存的密钥不会显示明文；输入新密钥后点击“保存 Provider”即替换。"
+                                               Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsRowStyle}">
+                                <StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="150"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="模型" Style="{StaticResource InfoLabelStyle}"/>
+                                        <ComboBox Grid.Column="1"
+                                                  Style="{StaticResource ModelComboStyle}"
+                                                  ItemsSource="{Binding Providers.ModelOptions}"
+                                                  Text="{Binding Providers.ModelText, UpdateSourceTrigger=PropertyChanged}"
+                                                  ToolTip="{Binding Providers.ModelText, UpdateSourceTrigger=PropertyChanged}"
+                                                  Margin="0,0,10,0"/>
+                                        <Button Grid.Column="2" Content="刷新模型"
+                                                Command="{Binding Providers.RefreshModelsCommand}"
+                                                Style="{StaticResource TechButtonStyle}"
+                                                Padding="14,7"/>
+                                    </Grid>
+                                    <TextBlock Text="可选择已发现的模型，或直接手动输入模型 ID；刷新不会清除手动输入。"
+                                               Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
+                                </StackPanel>
+                            </Border>
+
+                            <Border Style="{StaticResource SettingsRowStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="默认模型" Style="{StaticResource InfoLabelStyle}"/>
+                                    <ComboBox Grid.Column="1"
+                                              Style="{StaticResource ModelComboStyle}"
+                                              ItemsSource="{Binding Providers.ModelOptions}"
+                                              Text="{Binding Providers.DefaultModelText, UpdateSourceTrigger=PropertyChanged}"
+                                              ToolTip="保存后作为该 Provider 的默认模型"/>
+                                </Grid>
+                            </Border>
+
+                            <Border Padding="0,11,0,0">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Text="连接状态" Style="{StaticResource InfoLabelStyle}"/>
+                                    <TextBlock Grid.Column="1" Text="{Binding Providers.StatusMessage}"
+                                               Style="{StaticResource StatusTextStyle}"
+                                               VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                    <Button Grid.Column="2" Content="测试连接"
+                                            Command="{Binding Providers.TestConnectionCommand}"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Padding="16,8"/>
+                                </Grid>
+                            </Border>
+
+                            <Expander Margin="0,8,0,0" Header="高级设置" Foreground="#ABDCEA" FontSize="12">
+                                <StackPanel Margin="0,6,0,0">
+                                    <Border Style="{StaticResource SettingsRowStyle}">
+                                        <StackPanel>
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="150"/>
+                                                    <ColumnDefinition Width="*"/>
+                                                    <ColumnDefinition Width="Auto"/>
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="结构化输出" Style="{StaticResource InfoLabelStyle}"/>
+                                                <ComboBox Grid.Column="1"
+                                                          Style="{StaticResource ModelComboStyle}"
+                                                          IsEditable="False"
+                                                          ItemsSource="{Binding Providers.StructuredOutputModes}"
+                                                          SelectedValuePath="Mode"
+                                                          DisplayMemberPath="Label"
+                                                          SelectedValue="{Binding Providers.SelectedStructuredOutputMode}"
+                                                          Margin="0,0,10,0"/>
+                                                <Button Grid.Column="2" Content="测试结构化输出"
+                                                        Command="{Binding Providers.TestStructuredOutputCommand}"
+                                                        Style="{StaticResource SecondaryButtonStyle}"
+                                                        Padding="12,7"/>
+                                            </Grid>
+                                            <TextBlock Text="{Binding Providers.StructuredProbeText}"
+                                                       Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <TextBlock Text="{Binding Providers.ProviderIdDisplay, StringFormat='Provider ID：{0}（创建后不可修改）'}"
+                                               Style="{StaticResource SettingsHintStyle}" Margin="0,8,0,0"/>
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock DataContext="{Binding Providers}"
+                                   Text="{Binding StatusMessage}"
+                                   Style="{StaticResource StatusTextStyle}"
+                                   VerticalAlignment="Center"/>
+                        <Button Grid.Column="1" Content="保存 Provider"
+                                Command="{Binding Providers.SaveProviderCommand}"
+                                Style="{StaticResource TechButtonStyle}"
+                                Padding="22,9" FontWeight="Bold"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 02 诊断偏好 -->
+            <Border Grid.Row="3" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="诊断偏好" Style="{StaticResource SectionTitleStyle}"/>
                     <TextBlock Text="影响下一次诊断的输入处理方式"
@@ -422,7 +664,7 @@
             </Border>
 
             <!-- 03 硬件数据源（V2-M1） -->
-            <Border Grid.Row="3" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
+            <Border Grid.Row="4" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
                 <StackPanel>
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -489,7 +731,7 @@
             </Border>
 
             <!-- 04 历史与数据 -->
-            <Border Grid.Row="4" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
+            <Border Grid.Row="5" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
                 <StackPanel>
                     <TextBlock Text="历史与数据" Style="{StaticResource SectionTitleStyle}"/>
                     <TextBlock Text="诊断记录与本地数据均保留在本机"
@@ -540,7 +782,7 @@
             </Border>
 
             <!-- 底部保存区 -->
-            <Grid Grid.Row="5" Margin="0,18,0,0">
+            <Grid Grid.Row="6" Margin="0,18,0,0">
                 <Button Content="保存设置"
                         Command="{Binding SaveCommand}"
                         Style="{StaticResource TechButtonStyle}"

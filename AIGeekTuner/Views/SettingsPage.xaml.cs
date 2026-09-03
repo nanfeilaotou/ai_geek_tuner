@@ -7,12 +7,68 @@ namespace AIGeekTuner.Views
     public partial class SettingsPage : Page
     {
         private bool _syncingIntervalCombo;
+        private bool _syncingProviderKeyBox;
+        private AiProviderSettingsViewModel? _providersViewModel;
 
         public SettingsPage()
         {
             InitializeComponent();
-            Loaded += (_, _) => SyncIntervalFromVm();
-            DataContextChanged += (_, _) => SyncIntervalFromVm();
+            Loaded += (_, _) =>
+            {
+                SyncIntervalFromVm();
+                BindProviderKeyBox();
+            };
+            DataContextChanged += (_, _) =>
+            {
+                SyncIntervalFromVm();
+                BindProviderKeyBox();
+            };
+        }
+
+        // V2-M5.1A：Provider API Key 输入框的生命周期。
+        // 明文只在 PasswordBox 与 VM 瞬时字段之间单向流动；
+        // VM 要求清空（切换/保存/清除后）时通过事件回清控件，绝不回显已存密钥。
+        private void BindProviderKeyBox()
+        {
+            if (_providersViewModel is not null)
+            {
+                _providersViewModel.ApiKeyInputReset -= ClearProviderApiKeyBox;
+            }
+
+            _providersViewModel = (DataContext as SettingsViewModel)?.Providers;
+            if (_providersViewModel is not null)
+            {
+                _providersViewModel.ApiKeyInputReset += ClearProviderApiKeyBox;
+            }
+        }
+
+        private void ClearProviderApiKeyBox()
+        {
+            _syncingProviderKeyBox = true;
+            try
+            {
+                ProviderApiKeyBox.Clear();
+            }
+            finally
+            {
+                _syncingProviderKeyBox = false;
+            }
+        }
+
+        private void ProviderApiKey_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            if (_syncingProviderKeyBox)
+            {
+                return;
+            }
+
+            (DataContext as SettingsViewModel)?.Providers?.SetApiKeyInput(ProviderApiKeyBox.Password);
+        }
+
+        private void ProviderBeginKeyUpdate_Click(object sender, RoutedEventArgs e)
+        {
+            ClearProviderApiKeyBox();
+            ProviderApiKeyBox.Focus();
         }
 
         private void SyncIntervalFromVm()
