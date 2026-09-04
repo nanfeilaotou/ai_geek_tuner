@@ -327,8 +327,17 @@
                                           IsEditable="False"
                                           ItemsSource="{Binding Providers.SelectorItems}"
                                           SelectedItem="{Binding Providers.SelectedItem}"
-                                          DisplayMemberPath="Label"
-                                          Margin="0,0,10,0"/>
+                                          Margin="0,0,10,0">
+                                    <!-- V2-M5.1A.2：SelectionBoxItemTemplate 只取显式 ItemTemplate；
+                                         DisplayMemberPath 的生成模板不进入闭合态展示，会回退 object.ToString()。
+                                         显式模板保证下拉项与闭合态使用同一 display contract（Label=DisplayName）。 -->
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding Label}"
+                                                       TextTrimming="CharacterEllipsis"/>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
                                 <Button x:Name="AddProviderButton"
                                         Grid.Column="2" Content="＋ 添加 Provider"
                                         Click="AddProviderButton_Click"
@@ -511,7 +520,8 @@
                                 </Grid>
                             </Border>
 
-                            <Expander Margin="0,8,0,0" Header="高级设置" Foreground="#ABDCEA" FontSize="12">
+                            <Expander x:Name="AdvancedExpander"
+                                      Margin="0,8,0,0" Header="高级设置" Foreground="#ABDCEA" FontSize="12">
                                 <StackPanel Margin="0,6,0,0">
                                     <Border Style="{StaticResource SettingsRowStyle}">
                                         <StackPanel>
@@ -528,9 +538,14 @@
                                                           IsEditable="False"
                                                           ItemsSource="{Binding Providers.StructuredOutputModes}"
                                                           SelectedValuePath="Mode"
-                                                          DisplayMemberPath="Label"
-                                                          SelectedValue="{Binding Providers.SelectedStructuredOutputMode}"
-                                                          Margin="0,0,10,0"/>
+                                                          SelectedValue="{Binding Providers.SelectedStructuredOutputMode}">
+                                                    <ComboBox.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding Label}"
+                                                                       TextTrimming="CharacterEllipsis"/>
+                                                        </DataTemplate>
+                                                    </ComboBox.ItemTemplate>
+                                                </ComboBox>
                                                 <Button Grid.Column="2" Content="测试结构化输出"
                                                         Command="{Binding Providers.TestStructuredOutputCommand}"
                                                         Style="{StaticResource SecondaryButtonStyle}"
@@ -685,8 +700,11 @@
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="参考音频语言"
                                            Style="{StaticResource InfoLabelStyle}"/>
-                                <ComboBox Grid.Column="1" SelectedValuePath="Tag"
+                                <ComboBox x:Name="VoicePromptLangCombo"
+                                          Grid.Column="1" SelectedValuePath="Tag"
                                           SelectedValue="{Binding VoicePromptLang}"
+                                          Style="{StaticResource ModelComboStyle}"
+                                          IsEditable="False"
                                           HorizontalAlignment="Left" MinWidth="120">
                                     <ComboBoxItem Content="中文（zh）" Tag="zh"/>
                                     <ComboBoxItem Content="日语（ja）" Tag="ja"/>

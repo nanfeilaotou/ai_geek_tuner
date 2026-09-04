@@ -91,7 +91,19 @@ public class PageConstructionSmokeTests
                     DefaultModelId = "qwen3:8b",
                     StructuredOutputMode = AiStructuredOutputMode.NativeSchema
                 });
+                providerManager.Profiles.Add(new AiProviderProfile
+                {
+                    Id = "llama-cpp",
+                    DisplayName = "llama.cpp",
+                    Kind = AiProviderKind.OpenAiCompatible,
+                    BaseUrl = "http://127.0.0.1:8080/v1",
+                    Models = [new AiProviderModel("llama-cpp-model")],
+                    DefaultModelId = "llama-cpp-model",
+                    StructuredOutputMode = AiStructuredOutputMode.PromptOnly
+                });
                 var providerViewModel = new AiProviderSettingsViewModel(providerManager);
+                providerViewModel.SelectedItem = providerViewModel.SelectorItems
+                    .First(item => item.ExistingProfileId == "llama-cpp");
                 // 超长内容（视觉溢出风险用例）。
                 providerViewModel.BaseUrl =
                     "http://192.168.100.100:11434/with/an/extremely/long/path/segment/that/should/not/overflow";
@@ -134,19 +146,65 @@ public class PageConstructionSmokeTests
                     as ContentPresenter;
                 Assert.NotNull(contentSite);
                 var selectionBox = Assert.IsType<AiProviderSelectorItem>(providerCombo.SelectionBoxItem);
-                Assert.Equal("Ollama（从旧设置迁移）", selectionBox.Label);
+                Assert.Equal("llama.cpp", selectionBox.Label);
+
+                // ---- V2-M5.1A.2：闭合态 display contract ----
+                // SelectionBoxItemTemplate 只取显式 ItemTemplate（DisplayMemberPath 不进入闭合态展示，
+                // 会回退 object.ToString() 渲染出 CLR 类型名）。
+                Assert.True(providerCombo.ItemTemplate is not null, "providerCombo.ItemTemplate 不应为空");
+                Assert.Same(providerCombo.ItemTemplate, providerCombo.SelectionBoxItemTemplate);
+                // ApplyTemplate 之后需要重新走一遍布局，ContentSite 才会物化模板子元素。
+                page.Measure(new Size(533, double.PositiveInfinity));
+                page.Arrange(new Rect(0, 0, 533, page.DesiredSize.Height));
+                page.UpdateLayout();
+                Assert.Same(selectionBox, contentSite.Content);
+                var renderedText = FindFirstTextBlock(contentSite);
+                Assert.True(renderedText is not null, "ContentSite 中未找到渲染的 TextBlock");
+                Assert.Equal("llama.cpp", renderedText.Text); // 闭合态渲染恒为 DisplayName，绝非 CLR 类型名
+                Assert.DoesNotContain("AiProviderSelectorItem", renderedText.Text);
+
+                // 结构化输出（record 类型 ItemsSource）同样走显式模板。
+                var structuredCombo = Assert.IsType<ComboBox>(page.FindName("StructuredOutputCombo"));
+                Assert.False(structuredCombo.IsEditable); // selection-only
+                Assert.True(structuredCombo.ItemTemplate is not null, "structuredCombo.ItemTemplate 不应为空");
+                // 结构化输出在折叠的“高级设置”Expander 内，先展开才能进入可视树。
+                var advancedExpander = Assert.IsType<Expander>(page.FindName("AdvancedExpander"));
+                advancedExpander.IsExpanded = true;
+                page.UpdateLayout();
+                structuredCombo.ApplyTemplate();
+                page.Measure(new Size(533, double.PositiveInfinity));
+                page.Arrange(new Rect(0, 0, 533, page.DesiredSize.Height));
+                page.UpdateLayout();
+                var structuredSite = Assert.IsType<ContentPresenter>(
+                    structuredCombo.Template.FindName("ContentSite", structuredCombo));
+                var structuredText = FindFirstTextBlock(structuredSite);
+                Assert.True(structuredText is not null, "结构化输出 ContentSite 中未找到渲染的 TextBlock");
+                Assert.Equal("Prompt Only（仅提示词）", structuredText.Text);
 
                 var modelCombo = Assert.IsType<ComboBox>(page.FindName("ProviderModelCombo"));
                 Assert.True(modelCombo.IsEditable); // 自由输入 Model ID
                 var defaultModelCombo = Assert.IsType<ComboBox>(page.FindName("DefaultModelCombo"));
                 Assert.False(defaultModelCombo.IsEditable); // selection-only
-                var structuredCombo = Assert.IsType<ComboBox>(page.FindName("StructuredOutputCombo"));
-                Assert.False(structuredCombo.IsEditable); // selection-only
 
                 var intervalCombo = Assert.IsType<ComboBox>(page.FindName("RecordingIntervalCombo"));
                 Assert.False(intervalCombo.IsEditable); // selection-only
                 var intervalItem = Assert.IsType<ComboBoxItem>(intervalCombo.SelectedItem);
                 Assert.Equal("2 秒（推荐）", intervalItem.Content); // 当前值加载后直接可见
+
+                // ---- V2-M5.1A.2：GSV 参考音频语言（Problem B）----
+                var langCombo = Assert.IsType<ComboBox>(page.FindName("VoicePromptLangCombo"));
+                Assert.False(langCombo.IsEditable); // selection-only
+                Assert.Same(page.TryFindResource("ModelComboStyle"), langCombo.Style); // 主题化，非原生白框
+                var langItem = Assert.IsType<ComboBoxItem>(langCombo.SelectedItem);
+                Assert.Equal(settingsViewModel.VoicePromptLang, langItem.Tag); // 当前值可见且映射不变
+                Assert.Equal("日语（ja）", langItem.Content);
+
+                // 按真实用户路径切换：从下拉选择（VoicePromptLang 为旧式单向属性，UI→VM）。
+                langCombo.SelectedValue = "en";
+                Assert.Equal("en", settingsViewModel.VoicePromptLang); // prompt_lang 取值映射不变
+                var langItemAfterSwitch = Assert.IsType<ComboBoxItem>(langCombo.SelectedItem);
+                Assert.Equal("en", langItemAfterSwitch.Tag);
+                Assert.Equal("英语（en）", langItemAfterSwitch.Content); // 切换后选中显示同步更新
             }
             catch (Exception exception)
             {
@@ -160,6 +218,27 @@ public class PageConstructionSmokeTests
 
         Assert.True(failure is null,
             "Provider 卡片布局冒烟失败：" + failure?.GetType().Name + " | " + failure?.Message);
+    }
+
+    /// <summary>在闭合态 ContentSite 的可视树里找到实际渲染的 TextBlock。</summary>
+    private static TextBlock? FindFirstTextBlock(System.Windows.Media.Visual reference)
+    {
+        if (reference is TextBlock textBlock)
+        {
+            return textBlock;
+        }
+
+        for (var index = 0; index < System.Windows.Media.VisualTreeHelper.GetChildrenCount(reference); index++)
+        {
+            var found = FindFirstTextBlock(
+                (System.Windows.Media.Visual)System.Windows.Media.VisualTreeHelper.GetChild(reference, index));
+            if (found is not null)
+            {
+                return found;
+            }
+        }
+
+        return null;
     }
 
     private sealed class FakeSettingsServiceForSmoke : IApplicationSettingsService
