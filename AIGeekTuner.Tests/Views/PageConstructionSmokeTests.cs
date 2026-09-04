@@ -124,6 +124,29 @@ public class PageConstructionSmokeTests
                 var passwordBox = page.FindName("ProviderApiKeyBox") as PasswordBox;
                 Assert.NotNull(passwordBox);
                 Assert.Empty(passwordBox.Password); // 明文绝不回填到控件
+
+                // ---- V2-M5.1A.1：ComboBox 语义与选中内容展示 ----
+                var providerCombo = Assert.IsType<ComboBox>(page.FindName("ProviderSelectorCombo"));
+                Assert.False(providerCombo.IsEditable); // selection-only
+                // 根因修复：模板必须包含非编辑态内容展示位，闭合状态才可见。
+                providerCombo.ApplyTemplate();
+                var contentSite = providerCombo.Template.FindName("ContentSite", providerCombo)
+                    as ContentPresenter;
+                Assert.NotNull(contentSite);
+                var selectionBox = Assert.IsType<AiProviderSelectorItem>(providerCombo.SelectionBoxItem);
+                Assert.Equal("Ollama（从旧设置迁移）", selectionBox.Label);
+
+                var modelCombo = Assert.IsType<ComboBox>(page.FindName("ProviderModelCombo"));
+                Assert.True(modelCombo.IsEditable); // 自由输入 Model ID
+                var defaultModelCombo = Assert.IsType<ComboBox>(page.FindName("DefaultModelCombo"));
+                Assert.False(defaultModelCombo.IsEditable); // selection-only
+                var structuredCombo = Assert.IsType<ComboBox>(page.FindName("StructuredOutputCombo"));
+                Assert.False(structuredCombo.IsEditable); // selection-only
+
+                var intervalCombo = Assert.IsType<ComboBox>(page.FindName("RecordingIntervalCombo"));
+                Assert.False(intervalCombo.IsEditable); // selection-only
+                var intervalItem = Assert.IsType<ComboBoxItem>(intervalCombo.SelectedItem);
+                Assert.Equal("2 秒（推荐）", intervalItem.Content); // 当前值加载后直接可见
             }
             catch (Exception exception)
             {

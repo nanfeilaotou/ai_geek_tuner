@@ -17,17 +17,13 @@ namespace AIGeekTuner.ViewModels
     }
 
     /// <summary>
-    /// Provider 选择器里的一项：要么是已保存的 profile，要么是“＋ 添加”创建入口。
+    /// Provider 选择器里的一项：只承载已保存的 profile（创建入口是独立的“＋ 添加 Provider”菜单）。
     /// </summary>
     public sealed class AiProviderSelectorItem
     {
         public string Label { get; init; } = string.Empty;
 
         public string? ExistingProfileId { get; init; }
-
-        public AiProviderCreationPreset? CreationPreset { get; init; }
-
-        public bool IsCreationEntry => CreationPreset is not null;
     }
 
     /// <summary>结构化输出模式下拉项。</summary>
@@ -92,6 +88,9 @@ namespace AIGeekTuner.ViewModels
         private SettingsStatusKind _statusKind = SettingsStatusKind.Info;
         private string _structuredProbeText = string.Empty;
 
+        private readonly RelayCommand _createOllamaProviderCommand;
+        private readonly RelayCommand _createLmStudioProviderCommand;
+        private readonly RelayCommand _createCustomProviderCommand;
         private readonly AsyncRelayCommand _refreshModelsCommand;
         private readonly AsyncRelayCommand _testConnectionCommand;
         private readonly AsyncRelayCommand _testStructuredOutputCommand;
@@ -117,6 +116,12 @@ namespace AIGeekTuner.ViewModels
             _deleteProviderCommand = new AsyncRelayCommand(DeleteAsync, () => !IsSaving);
             _beginKeyUpdateCommand = new RelayCommand(BeginKeyUpdate);
             _clearKeyCommand = new RelayCommand(MarkKeyPendingClear);
+            _createOllamaProviderCommand = new RelayCommand(
+                () => StartCreateProvider(AiProviderCreationPreset.Ollama));
+            _createLmStudioProviderCommand = new RelayCommand(
+                () => StartCreateProvider(AiProviderCreationPreset.LmStudio));
+            _createCustomProviderCommand = new RelayCommand(
+                () => StartCreateProvider(AiProviderCreationPreset.CustomOpenAiCompatible));
 
             ReloadProfiles(selectId: null);
         }
@@ -380,6 +385,12 @@ namespace AIGeekTuner.ViewModels
 
         public RelayCommand ClearKeyCommand => _clearKeyCommand;
 
+        public RelayCommand CreateOllamaProviderCommand => _createOllamaProviderCommand;
+
+        public RelayCommand CreateLmStudioProviderCommand => _createLmStudioProviderCommand;
+
+        public RelayCommand CreateCustomProviderCommand => _createCustomProviderCommand;
+
         /// <summary>密钥输入框需要被清空时通知视图（PasswordBox 无法从 VM 直接清空）。</summary>
         public event Action? ApiKeyInputReset;
 
@@ -395,12 +406,6 @@ namespace AIGeekTuner.ViewModels
             if (item is null)
             {
                 ClearDraft();
-                return;
-            }
-
-            if (item.IsCreationEntry)
-            {
-                LoadCreationDraft(item.CreationPreset!.Value);
                 return;
             }
 
@@ -436,6 +441,27 @@ namespace AIGeekTuner.ViewModels
             OnPropertyChanged(nameof(HasStoredCredential));
             HasUnsavedChanges = false;
             SetStatus(SettingsStatusKind.Info, "请选择或添加一个 Provider。");
+        }
+
+        /// <summary>
+        /// “＋ 添加 Provider”菜单入口：新建预设草稿。
+        /// 复用原有 preset / ID 生成 / dirty 保护语义，不新建状态机；
+        /// 用户放弃未保存修改时保持当前草稿不动。
+        /// </summary>
+        public void StartCreateProvider(AiProviderCreationPreset preset)
+        {
+            if (_manager is null)
+            {
+                SetStatus(SettingsStatusKind.Warning, "Provider 配置组件在此环境未启用。");
+                return;
+            }
+
+            if (HasUnsavedChanges && !ConfirmDiscardChanges())
+            {
+                return;
+            }
+
+            LoadCreationDraft(preset);
         }
 
         private void LoadCreationDraft(AiProviderCreationPreset preset)
@@ -547,22 +573,6 @@ namespace AIGeekTuner.ViewModels
                     ExistingProfileId = profile.Id
                 });
             }
-
-            SelectorItems.Add(new AiProviderSelectorItem
-            {
-                Label = "＋ 添加：Ollama",
-                CreationPreset = AiProviderCreationPreset.Ollama
-            });
-            SelectorItems.Add(new AiProviderSelectorItem
-            {
-                Label = "＋ 添加：LM Studio",
-                CreationPreset = AiProviderCreationPreset.LmStudio
-            });
-            SelectorItems.Add(new AiProviderSelectorItem
-            {
-                Label = "＋ 添加：自定义 OpenAI Compatible",
-                CreationPreset = AiProviderCreationPreset.CustomOpenAiCompatible
-            });
 
             var target = selectId is null
                 ? null

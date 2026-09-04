@@ -71,6 +71,17 @@ namespace AIGeekTuner.Views
             ProviderApiKeyBox.Focus();
         }
 
+        // V2-M5.1A.1：“＋ 添加 Provider”紧凑菜单入口（预设选项见菜单项，命令在 ViewModel）。
+        private void AddProviderButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (sender is Button button)
+            {
+                button.ContextMenu.PlacementTarget = button;
+                button.ContextMenu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+                button.ContextMenu.IsOpen = true;
+            }
+        }
+
         private void SyncIntervalFromVm()
         {
             if (DataContext is not SettingsViewModel viewModel)

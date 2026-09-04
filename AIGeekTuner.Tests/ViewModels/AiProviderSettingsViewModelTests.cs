@@ -104,7 +104,7 @@ public class AiProviderSettingsViewModelTests : IDisposable
     {
         var viewModel = CreateVmWithSingleProfile();
 
-        viewModel.SelectedItem = CreationEntry(viewModel, AiProviderCreationPreset.LmStudio);
+        viewModel.StartCreateProvider(AiProviderCreationPreset.LmStudio);
 
         Assert.True(viewModel.IsNewDraft);
         Assert.Equal("OpenAI Compatible", viewModel.KindDisplay);
@@ -125,7 +125,7 @@ public class AiProviderSettingsViewModelTests : IDisposable
             AiProviderKind.OpenAiCompatible, [], null));
         var viewModel = new AiProviderSettingsViewModel(manager);
 
-        viewModel.SelectedItem = CreationEntry(viewModel, AiProviderCreationPreset.CustomOpenAiCompatible);
+        viewModel.StartCreateProvider(AiProviderCreationPreset.CustomOpenAiCompatible);
 
         Assert.Equal("custom-2", viewModel.ProviderIdDisplay);
         Assert.Equal(AiStructuredOutputMode.PromptOnly, viewModel.SelectedStructuredOutputMode);
@@ -424,7 +424,7 @@ public class AiProviderSettingsViewModelTests : IDisposable
             null,
             async providerId => await fixture.Credentials.LoadAsync(providerId) is not null);
 
-        viewModel.SelectedItem = CreationEntry(viewModel, AiProviderCreationPreset.LmStudio);
+        viewModel.StartCreateProvider(AiProviderCreationPreset.LmStudio);
         viewModel.BaseUrl = "http://127.0.0.1:1234/v1";
         viewModel.ModelText = "loaded-model";
 
@@ -495,39 +495,123 @@ public class AiProviderSettingsViewModelTests : IDisposable
 
         Assert.Empty(fixture.Manager.ListProfiles());
         Assert.Null(await fixture.Credentials.LoadAsync("custom-1"));
-        Assert.Equal(3, viewModel.SelectorItems.Count); // 只剩 3 个创建入口
+        Assert.Empty(viewModel.SelectorItems); // 创建入口已移出选择器，不再有残留项
         Assert.Null(viewModel.SelectedItem);
         Assert.True(dialog.ConfirmCalls >= 1);
         Assert.Contains("凭据也会删除", dialog.ConfirmMessages[0]);
     }
 
     // ============================================================
-    // 24. dirty 时切换 Provider 的保护
+    // 24. dirty 时切换 Provider / 新建 Provider 的保护（Gate H）
     // ============================================================
 
     [Fact]
     public async Task SwitchProfile_WithDirtyDraft_RequiresConfirmation()
     {
         var dialog = new FakeConfirmationDialog();
-        var viewModel = CreateVmWithSingleProfile(dialog: dialog);
+        var manager = new FakeAiProviderManager();
+        manager.Profiles.Add(MakeProfile("ollama", "Ollama", "http://127.0.0.1:11434",
+            AiProviderKind.OllamaNative, ["my-model"], "my-model"));
+        manager.Profiles.Add(MakeProfile("lmstudio", "LM Studio", "http://127.0.0.1:1234/v1",
+            AiProviderKind.OpenAiCompatible, ["loaded-model"], "loaded-model"));
+        var viewModel = new AiProviderSettingsViewModel(manager, dialog);
         viewModel.DisplayName = "未保存的名字";
         var originalItem = viewModel.SelectedItem;
 
         dialog.Answer = false;
-        viewModel.SelectedItem = CreationEntry(viewModel, AiProviderCreationPreset.LmStudio);
+        viewModel.SelectedItem = viewModel.SelectorItems.First(item => item.ExistingProfileId == "lmstudio");
         Assert.Same(originalItem, viewModel.SelectedItem);
         Assert.Equal("未保存的名字", viewModel.DisplayName);
         Assert.Equal(1, dialog.ConfirmCalls);
 
         dialog.Answer = true;
-        viewModel.SelectedItem = CreationEntry(viewModel, AiProviderCreationPreset.LmStudio);
-        Assert.NotSame(originalItem, viewModel.SelectedItem);
-        Assert.True(viewModel.IsNewDraft);
+        viewModel.SelectedItem = viewModel.SelectorItems.First(item => item.ExistingProfileId == "lmstudio");
+        Assert.Equal("lmstudio", viewModel.SelectedItem?.ExistingProfileId);
         Assert.Equal("LM Studio", viewModel.DisplayName);
         Assert.False(viewModel.HasUnsavedChanges);
         Assert.Equal(2, dialog.ConfirmCalls);
 
         await Task.CompletedTask;
+    }
+
+    [Fact]
+    public void AddProvider_WithDirtyDraft_RequiresConfirmation()
+    {
+        var dialog = new FakeConfirmationDialog();
+        var viewModel = CreateVmWithSingleProfile(dialog: dialog);
+        viewModel.DisplayName = "未保存的名字";
+
+        dialog.Answer = false;
+        viewModel.StartCreateProvider(AiProviderCreationPreset.LmStudio);
+        Assert.False(viewModel.IsNewDraft);
+        Assert.Equal("未保存的名字", viewModel.DisplayName);
+        Assert.Equal(1, dialog.ConfirmCalls);
+
+        dialog.Answer = true;
+        viewModel.StartCreateProvider(AiProviderCreationPreset.LmStudio);
+        Assert.True(viewModel.IsNewDraft);
+        Assert.Equal("LM Studio", viewModel.DisplayName);
+        Assert.Equal(2, dialog.ConfirmCalls);
+    }
+
+    // ============================================================
+    // V2-M5.1A.1：Provider 选择器语义
+    // ============================================================
+
+    [Fact]
+    public void SelectorItems_ContainOnlyProfiles_WithDisplayNameLabels()
+    {
+        var manager = new FakeAiProviderManager();
+        manager.Profiles.Add(MakeProfile("deepseek", "DeepSeek V4 Flash", "https://api.deepseek.com/v1",
+            AiProviderKind.OpenAiCompatible, ["deepseek-v4-flash"], "deepseek-v4-flash"));
+        manager.Profiles.Add(MakeProfile("lmstudio", "LM Studio", "http://127.0.0.1:1234/v1",
+            AiProviderKind.OpenAiCompatible, ["loaded-model"], "loaded-model"));
+        var viewModel = new AiProviderSettingsViewModel(manager);
+
+        Assert.Equal(2, viewModel.SelectorItems.Count);
+        Assert.All(viewModel.SelectorItems, item => Assert.DoesNotContain("＋", item.Label));
+        Assert.Equal("DeepSeek V4 Flash", viewModel.SelectedItem?.Label);
+        Assert.Equal("DeepSeek V4 Flash", viewModel.DisplayName);
+
+        viewModel.SelectedItem = viewModel.SelectorItems.First(item => item.ExistingProfileId == "lmstudio");
+        Assert.Equal("LM Studio", viewModel.SelectedItem?.Label);
+        Assert.Equal("LM Studio", viewModel.DisplayName);
+    }
+
+    [Fact]
+    public void CreateOllamaCommand_GeneratesNonConflictingId_WithPresetDefaults()
+    {
+        var manager = new FakeAiProviderManager();
+        manager.Profiles.Add(MakeProfile("ollama", "Ollama（从旧设置迁移）", "http://192.168.1.77:11434",
+            AiProviderKind.OllamaNative, ["qwen3:8b"], "qwen3:8b"));
+        var viewModel = new AiProviderSettingsViewModel(manager);
+
+        viewModel.CreateOllamaProviderCommand.Execute(null);
+
+        Assert.True(viewModel.IsNewDraft);
+        Assert.Equal("ollama-2", viewModel.ProviderIdDisplay);
+        Assert.Equal(AiProviderPresets.OllamaDefaultBaseUrl, viewModel.BaseUrl);
+        Assert.Equal("Ollama Native", viewModel.KindDisplay);
+        Assert.Equal(AiStructuredOutputMode.NativeSchema, viewModel.SelectedStructuredOutputMode);
+    }
+
+    [Fact]
+    public async Task ManuallyAddedModel_CanLaterBecomeDefaultModel()
+    {
+        var viewModel = CreateVmWithSingleProfile();
+        var manager = TestManager(viewModel);
+
+        // 在“模型”栏手输新模型并保存（复用“保存时自动并入 Models”语义）。
+        viewModel.ModelText = "brand-new-model";
+        await viewModel.SaveProviderCommand.ExecuteAsync();
+        Assert.Contains(
+            Assert.Single(manager.SaveCalls).Draft.Models,
+            model => model.Id == "brand-new-model");
+
+        // 新模型已进入 Models，可以被选为默认模型并再次保存。
+        viewModel.DefaultModelText = "brand-new-model";
+        await viewModel.SaveProviderCommand.ExecuteAsync();
+        Assert.Equal("brand-new-model", manager.SaveCalls[^1].Draft.DefaultModelId);
     }
 
     // ============================================================
@@ -577,13 +661,6 @@ public class AiProviderSettingsViewModelTests : IDisposable
         {
             Assert.DoesNotContain(secret, item.Label);
         }
-    }
-
-    private static AiProviderSelectorItem CreationEntry(
-        AiProviderSettingsViewModel viewModel,
-        AiProviderCreationPreset preset)
-    {
-        return viewModel.SelectorItems.First(item => item.CreationPreset == preset);
     }
 
     private AiProviderSettingsViewModel CreateVmWithSingleProfile(

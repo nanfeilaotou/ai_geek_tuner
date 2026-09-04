@@ -93,13 +93,27 @@
                                 </ToggleButton.Template>
                             </ToggleButton>
 
+                            <!-- 非编辑态（selection-only）的选中内容展示：
+                                 默认模板靠它显示 SelectedItem/DisplayMemberPath 结果；
+                                 旧模板缺失导致闭合状态永远空白（V2-M5.1A.1 修复）。 -->
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                              Margin="8,0,26,0"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="#F4FCFF"
+                                              TextElement.FontSize="13"/>
+
                             <TextBox x:Name="PART_EditableTextBox"
                                      Margin="6,4,26,4"
                                      Background="Transparent"
                                      Foreground="#F4FCFF"
                                      CaretBrush="White"
                                      BorderThickness="0"
-                                     VerticalAlignment="Center"/>
+                                     VerticalAlignment="Center"
+                                     Visibility="Collapsed"/>
 
                             <Popup x:Name="Popup"
                                    Placement="Bottom"
@@ -118,6 +132,12 @@
                                 </Border>
                             </Popup>
                         </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEditable" Value="True">
+                                <Setter TargetName="ContentSite" Property="Visibility" Value="Collapsed"/>
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
@@ -298,16 +318,38 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="当前编辑" Style="{StaticResource InfoLabelStyle}"/>
-                                <ComboBox Grid.Column="1"
+                                <ComboBox x:Name="ProviderSelectorCombo"
+                                          Grid.Column="1"
                                           Style="{StaticResource ModelComboStyle}"
                                           IsEditable="False"
                                           ItemsSource="{Binding Providers.SelectorItems}"
                                           SelectedItem="{Binding Providers.SelectedItem}"
                                           DisplayMemberPath="Label"
                                           Margin="0,0,10,0"/>
-                                <TextBlock Grid.Column="2" Text="有未保存更改"
+                                <Button x:Name="AddProviderButton"
+                                        Grid.Column="2" Content="＋ 添加 Provider"
+                                        Click="AddProviderButton_Click"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="12,6" Margin="0,0,8,0"
+                                        ToolTip="从预设新建 Provider 草稿">
+                                    <Button.ContextMenu>
+                                        <ContextMenu Background="#123B63" BorderBrush="#48B8E6F5">
+                                            <MenuItem Header="Ollama"
+                                                      Command="{Binding Providers.CreateOllamaProviderCommand}"
+                                                      Foreground="#F4FCFF"/>
+                                            <MenuItem Header="LM Studio"
+                                                      Command="{Binding Providers.CreateLmStudioProviderCommand}"
+                                                      Foreground="#F4FCFF"/>
+                                            <MenuItem Header="自定义 OpenAI Compatible"
+                                                      Command="{Binding Providers.CreateCustomProviderCommand}"
+                                                      Foreground="#F4FCFF"/>
+                                        </ContextMenu>
+                                    </Button.ContextMenu>
+                                </Button>
+                                <TextBlock Grid.Column="3" Text="有未保存更改"
                                            Foreground="#FFE08A" FontSize="12"
                                            VerticalAlignment="Center" Margin="0,0,10,0">
                                     <TextBlock.Style>
@@ -321,7 +363,7 @@
                                         </Style>
                                     </TextBlock.Style>
                                 </TextBlock>
-                                <Button Grid.Column="3" Content="删除 Provider"
+                                <Button Grid.Column="4" Content="删除 Provider"
                                         Command="{Binding Providers.DeleteProviderCommand}"
                                         IsEnabled="{Binding Providers.HasSelection}"
                                         Style="{StaticResource SecondaryButtonStyle}"
@@ -416,8 +458,10 @@
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="模型" Style="{StaticResource InfoLabelStyle}"/>
-                                        <ComboBox Grid.Column="1"
+                                        <ComboBox x:Name="ProviderModelCombo"
+                                                  Grid.Column="1"
                                                   Style="{StaticResource ModelComboStyle}"
+                                                  IsEditable="True"
                                                   ItemsSource="{Binding Providers.ModelOptions}"
                                                   Text="{Binding Providers.ModelText, UpdateSourceTrigger=PropertyChanged}"
                                                   ToolTip="{Binding Providers.ModelText, UpdateSourceTrigger=PropertyChanged}"
@@ -439,11 +483,13 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <TextBlock Text="默认模型" Style="{StaticResource InfoLabelStyle}"/>
-                                    <ComboBox Grid.Column="1"
+                                    <ComboBox x:Name="DefaultModelCombo"
+                                              Grid.Column="1"
                                               Style="{StaticResource ModelComboStyle}"
+                                              IsEditable="False"
                                               ItemsSource="{Binding Providers.ModelOptions}"
-                                              Text="{Binding Providers.DefaultModelText, UpdateSourceTrigger=PropertyChanged}"
-                                              ToolTip="保存后作为该 Provider 的默认模型"/>
+                                              SelectedItem="{Binding Providers.DefaultModelText}"
+                                              ToolTip="只能从该 Provider 的模型列表中选择；新模型请先在“模型”栏输入并保存"/>
                                 </Grid>
                             </Border>
 
@@ -476,7 +522,8 @@
                                                     <ColumnDefinition Width="Auto"/>
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Text="结构化输出" Style="{StaticResource InfoLabelStyle}"/>
-                                                <ComboBox Grid.Column="1"
+                                                <ComboBox x:Name="StructuredOutputCombo"
+                                                          Grid.Column="1"
                                                           Style="{StaticResource ModelComboStyle}"
                                                           IsEditable="False"
                                                           ItemsSource="{Binding Providers.StructuredOutputModes}"
