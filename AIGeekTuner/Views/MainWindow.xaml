@@ -6,17 +6,18 @@
         MinHeight="680" MinWidth="1024"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"
-        ResizeMode="CanResize"
+        ResizeMode="NoResize"
         Background="{DynamicResource AppBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
+        SourceInitialized="Window_SourceInitialized"
         StateChanged="Window_StateChanged"
         PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40"
-                            ResizeBorderThickness="6"
+                            ResizeBorderThickness="0"
                             GlassFrameThickness="0"
-                            CornerRadius="0"
+                            CornerRadius="8"
                             UseAeroCaptionButtons="False"/>
     </shell:WindowChrome.WindowChrome>
     <Grid>

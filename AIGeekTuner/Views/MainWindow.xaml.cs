@@ -62,6 +62,8 @@ namespace AIGeekTuner
         private readonly LatestDiagnosisState _latestDiagnosisState;
         private readonly SettingsViewModel _settingsViewModel;
         private readonly AiProviderSettingsViewModel _aiProviderSettingsViewModel;
+        private readonly double _normalWidth;
+        private readonly double _normalHeight;
 
         /// <summary>运行时配置中心；设置页保存后整体换入新快照。</summary>
         internal DiagnosticConfigurationStore ConfigurationStore { get; }
@@ -75,6 +77,8 @@ namespace AIGeekTuner
         public MainWindow()
         {
             InitializeComponent();
+            _normalWidth = Width;
+            _normalHeight = Height;
             UpdateCaptionGlyphs();
 
             var applicationDataPaths = ApplicationDataPaths.Default;
@@ -257,6 +261,13 @@ namespace AIGeekTuner
         private void CloseButton_Click(object sender, RoutedEventArgs e) =>
             WindowChromeController.Close(this);
 
+        private void Window_SourceInitialized(object? sender, EventArgs e)
+        {
+            // DWM is optional: unsupported Windows versions and remote sessions
+            // safely remain square without affecting startup.
+            WindowCornerController.TryApplyRoundedCorners(this);
+        }
+
         private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             if (e.Handled
@@ -284,10 +295,25 @@ namespace AIGeekTuner
                 // A synthetic/unit-test event may not have an active HWND.
                 // A real WPF window receives the native drag operation here.
             }
+            finally
+            {
+                Mouse.Capture(null);
+                PostDragInputSynchronizer.Schedule(Dispatcher);
+            }
         }
 
-        private void Window_StateChanged(object? sender, EventArgs e) =>
+        private void Window_StateChanged(object? sender, EventArgs e)
+        {
+            if (WindowState == WindowState.Normal
+                && _normalWidth > 0
+                && _normalHeight > 0)
+            {
+                Width = _normalWidth;
+                Height = _normalHeight;
+            }
+
             UpdateCaptionGlyphs();
+        }
 
         private void UpdateCaptionGlyphs()
         {
@@ -400,4 +426,3 @@ namespace AIGeekTuner
         }
     }
 }
-

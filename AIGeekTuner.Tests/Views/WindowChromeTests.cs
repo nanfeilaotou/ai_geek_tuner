@@ -28,8 +28,11 @@ public sealed class WindowChromeTests
             Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml")));
 
         Assert.Contains("WindowStyle=\"None\"", xaml);
-        Assert.Contains("ResizeMode=\"CanResize\"", xaml);
+        Assert.Contains("ResizeMode=\"NoResize\"", xaml);
         Assert.Contains("shell:WindowChrome.WindowChrome", xaml);
+        Assert.Contains("ResizeBorderThickness=\"0\"", xaml);
+        Assert.Contains("CornerRadius=\"8\"", xaml);
+        Assert.Contains("SourceInitialized=\"Window_SourceInitialized\"", xaml);
         Assert.Contains("x:Name=\"TitleBar\"", xaml);
         Assert.Contains("x:Name=\"MinimizeButton\"", xaml);
         Assert.Contains("x:Name=\"MaximizeButton\"", xaml);
@@ -75,9 +78,11 @@ public sealed class WindowChromeTests
                 EnsureThemeResources();
                 var window = new MainWindow();
                 Assert.Equal(WindowStyle.None, window.WindowStyle);
-                Assert.Equal(ResizeMode.CanResize, window.ResizeMode);
+                Assert.Equal(ResizeMode.NoResize, window.ResizeMode);
                 Assert.Equal(1024, window.MinWidth);
                 Assert.Equal(680, window.MinHeight);
+                Assert.Equal(1180, window.Width);
+                Assert.Equal(760, window.Height);
                 Assert.IsType<Border>(window.FindName("TitleBar"));
                 Assert.NotNull(window.FindName("MinimizeButton"));
                 Assert.NotNull(window.FindName("MaximizeButton"));
@@ -94,6 +99,22 @@ public sealed class WindowChromeTests
                     block => block.Text == "仪表盘");
                 Assert.NotNull(dashboardTitle);
                 Assert.True(WindowDragHitTest.IsDraggableFrom(dashboardTitle, window));
+
+                WindowChromeController.ToggleMaximize(window);
+                Assert.Equal(WindowState.Maximized, window.WindowState);
+                WindowChromeController.ToggleMaximize(window);
+                Assert.Equal(WindowState.Normal, window.WindowState);
+                Assert.Equal(1180, window.Width);
+                Assert.Equal(760, window.Height);
+
+                // Even if code temporarily changes bounds, the Normal restore
+                // contract remains the original 1180x760 DIP design size.
+                window.Width = 900;
+                window.Height = 700;
+                WindowChromeController.ToggleMaximize(window);
+                WindowChromeController.ToggleMaximize(window);
+                Assert.Equal(1180, window.Width);
+                Assert.Equal(760, window.Height);
                 window.Close();
             }
             catch (Exception exception)
@@ -145,6 +166,50 @@ public sealed class WindowChromeTests
         Assert.False(WindowChromeController.IsMaximized(WindowState.Normal));
         Assert.True(WindowChromeController.IsMaximized(WindowState.Maximized));
         Assert.False(WindowChromeController.IsMaximized(WindowState.Minimized));
+    }
+
+    [Fact]
+    public void DwmCornerHelper_FailureIsNonFatalAndRequiresAnHwnd()
+    {
+        Assert.False(WindowCornerController.TryApplyRoundedCorners(IntPtr.Zero));
+
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var window = new Window();
+                Assert.False(WindowCornerController.TryApplyRoundedCorners(window));
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "DWM corner test 超时");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void PostDragInputSynchronizer_SchedulesExactlyOneInputSync()
+    {
+        var scheduled = 0;
+        var synchronized = 0;
+
+        PostDragInputSynchronizer.Schedule(
+            (priority, callback) =>
+            {
+                Assert.Equal(DispatcherPriority.Input, priority);
+                scheduled++;
+                callback();
+            },
+            () => synchronized++);
+
+        Assert.Equal(1, scheduled);
+        Assert.Equal(1, synchronized);
     }
 
     [Fact]

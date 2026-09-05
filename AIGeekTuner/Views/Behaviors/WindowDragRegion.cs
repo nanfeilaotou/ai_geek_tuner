@@ -77,6 +77,11 @@ namespace AIGeekTuner.Views.Behaviors
                 // A synthetic/unit-test mouse event may not have an active HWND.
                 // Native WPF input remains deterministic for a real window.
             }
+            finally
+            {
+                Mouse.Capture(null);
+                PostDragInputSynchronizer.Schedule(window.Dispatcher);
+            }
         }
     }
 }
