@@ -113,6 +113,14 @@
                             <Setter TargetName="Root" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
                         </MultiDataTrigger>
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=(behaviors:WindowMoveState.IsMoving)}" Value="True"/>
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=(behaviors:SidebarHoverState.IsMoveHovered)}" Value="True"/>
+                            </MultiDataTrigger.Conditions>
+                            <Setter TargetName="Root" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
+                            <Setter Property="Foreground" Value="White"/>
+                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

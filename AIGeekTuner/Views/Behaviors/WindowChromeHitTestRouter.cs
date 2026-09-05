@@ -20,6 +20,7 @@ public sealed class WindowChromeHitTestRouter : IDisposable
     public const int WmNcLButtonDblClk = 0x00A3;
     public const int WmNcDestroy = 0x0082;
     public const int WmEnterSizeMove = 0x0231;
+    public const int WmMoving = 0x0216;
     public const int WmExitSizeMove = 0x0232;
     public const int HtClient = 1;
     public const int HtCaption = 2;
@@ -28,16 +29,20 @@ public sealed class WindowChromeHitTestRouter : IDisposable
 
     private readonly Window _window;
     private readonly SubclassProc _subclassProc;
+    private readonly SidebarMoveHoverTracker? _sidebarMoveHoverTracker;
     private readonly UIntPtr _subclassId;
     private IntPtr _hwnd;
     private bool _attached;
     private bool _disposed;
     private bool _moveExitQueued;
 
-    public WindowChromeHitTestRouter(Window window)
+    public WindowChromeHitTestRouter(Window window, FrameworkElement? sidebarRoot = null)
     {
         _window = window ?? throw new ArgumentNullException(nameof(window));
         _subclassProc = NativeSubclassProcedure;
+        _sidebarMoveHoverTracker = sidebarRoot is null
+            ? null
+            : new SidebarMoveHoverTracker(sidebarRoot);
         var id = unchecked((ulong)Interlocked.Increment(ref _nextSubclassId));
         _subclassId = new UIntPtr(id == 0 ? 1UL : id);
         Attach();
@@ -125,6 +130,8 @@ public sealed class WindowChromeHitTestRouter : IDisposable
                 _attached = false;
                 _disposed = true;
                 _hwnd = IntPtr.Zero;
+                _sidebarMoveHoverTracker?.Clear();
+                WindowMoveState.SetIsMoving(_window, false);
                 return DefSubclassProc(hwnd, message, wParam, lParam);
             }
 
@@ -136,9 +143,15 @@ public sealed class WindowChromeHitTestRouter : IDisposable
             if (message == WmEnterSizeMove)
             {
                 SetMovingState(true);
+                UpdateSidebarMoveHoverFromCursor(begin: true);
+            }
+            else if (message == WmMoving)
+            {
+                UpdateSidebarMoveHoverFromCursor(begin: false);
             }
             else if (message == WmExitSizeMove)
             {
+                UpdateSidebarMoveHoverFromCursor(begin: false);
                 ScheduleMoveEndSynchronization();
             }
             else if (message == WmNcHitTest
@@ -194,9 +207,27 @@ public sealed class WindowChromeHitTestRouter : IDisposable
                 finally
                 {
                     WindowMoveState.SetIsMoving(_window, false);
+                    _sidebarMoveHoverTracker?.Clear();
                     _moveExitQueued = false;
                 }
             }));
+    }
+
+    private void UpdateSidebarMoveHoverFromCursor(bool begin)
+    {
+        if (_sidebarMoveHoverTracker is null || !TryGetCursorPosition(out var screenPoint))
+        {
+            return;
+        }
+
+        if (begin)
+        {
+            _sidebarMoveHoverTracker.BeginTracking(screenPoint);
+        }
+        else
+        {
+            _sidebarMoveHoverTracker.UpdateFromScreenPoint(screenPoint);
+        }
     }
 
     private void SetMovingState(bool value)
@@ -265,6 +296,29 @@ public sealed class WindowChromeHitTestRouter : IDisposable
         IntPtr lParam,
         UIntPtr subclassId,
         UIntPtr refData);
+
+    private static bool TryGetCursorPosition(out Point screenPoint)
+    {
+        if (GetCursorPos(out var point))
+        {
+            screenPoint = new Point(point.X, point.Y);
+            return true;
+        }
+
+        screenPoint = default;
+        return false;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out NativePoint point);
 
     [DllImport("comctl32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

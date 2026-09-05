@@ -288,6 +288,136 @@ public sealed class WindowChromeTests
     }
 
     [Fact]
+    public void SidebarHoverPolicy_UsesMoveTargetInsteadOfStaleMouseOver()
+    {
+        Assert.True(SidebarHoverState.IsHoverActive(
+            isMoving: false,
+            isMouseOver: true,
+            isMoveHovered: false));
+        Assert.False(SidebarHoverState.IsHoverActive(
+            isMoving: true,
+            isMouseOver: true,
+            isMoveHovered: false));
+        Assert.True(SidebarHoverState.IsHoverActive(
+            isMoving: true,
+            isMouseOver: true,
+            isMoveHovered: true));
+        Assert.False(SidebarHoverState.IsHoverActive(
+            isMoving: true,
+            isMouseOver: false,
+            isMoveHovered: false));
+    }
+
+    [Fact]
+    public void SidebarMoveHoverTarget_FollowsScreenCursorAndClearsOutside()
+    {
+        var a = new DependencyObject();
+        var b = new DependencyObject();
+        var c = new DependencyObject();
+        var items = new (DependencyObject Item, Rect Bounds)[]
+        {
+            (a, new Rect(0, 0, 100, 40)),
+            (b, new Rect(0, 40, 100, 40)),
+            (c, new Rect(0, 80, 100, 40))
+        };
+
+        Assert.Same(a, SidebarMoveHoverTracker.SelectTarget(new Point(20, 20), items));
+        Assert.Same(b, SidebarMoveHoverTracker.SelectTarget(new Point(20, 60), items));
+        Assert.Same(c, SidebarMoveHoverTracker.SelectTarget(new Point(20, 100), items));
+        Assert.Null(SidebarMoveHoverTracker.SelectTarget(new Point(200, 100), items));
+    }
+
+    [Fact]
+    public void SidebarMoveHoverTracker_UpdatesOnlyTheCurrentNavigationItem()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var panel = new StackPanel();
+                var a = new Button { Tag = "A", Height = 30 };
+                var b = new Button { Tag = "B", Height = 30 };
+                var c = new Button { Tag = "C", Height = 30 };
+                panel.Children.Add(a);
+                panel.Children.Add(b);
+                panel.Children.Add(c);
+
+                var window = new Window
+                {
+                    Content = panel,
+                    Width = 160,
+                    Height = 140,
+                    WindowStartupLocation = WindowStartupLocation.Manual,
+                    Left = 100,
+                    Top = 100
+                };
+                window.Show();
+                window.UpdateLayout();
+
+                var tracker = new SidebarMoveHoverTracker(panel);
+                tracker.BeginTracking(a.PointToScreen(new Point(5, 5)));
+                Assert.True(SidebarHoverState.GetIsMoveHovered(a));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(b));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(c));
+
+                tracker.UpdateFromScreenPoint(b.PointToScreen(new Point(5, 5)));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(a));
+                Assert.True(SidebarHoverState.GetIsMoveHovered(b));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(c));
+
+                tracker.UpdateFromScreenPoint(new Point(-10000, -10000));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(a));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(b));
+                Assert.False(SidebarHoverState.GetIsMoveHovered(c));
+                window.Close();
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "sidebar move-hover tracker test 超时");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void SidebarHoverState_IsNotACommandOrNavigationState()
+    {
+        var source = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "SidebarHoverState.cs")));
+        Assert.DoesNotContain("Navigate", source);
+        Assert.DoesNotContain("ICommand", source);
+    }
+
+    [Fact]
+    public void NativeHitTestRouter_TracksMovingCursorAndSidebarState()
+    {
+        var router = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs")));
+        Assert.Contains("WmMoving", router);
+        Assert.Contains("GetCursorPos", router);
+        Assert.Contains("BeginTracking", router);
+        Assert.Contains("UpdateFromScreenPoint", router);
+        Assert.Contains("WmExitSizeMove", router);
+    }
+
+    [Fact]
+    public void CaptionButtonStyle_DoesNotDependOnSidebarMoveHover()
+    {
+        var theme = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Themes", "BlueToolboxTheme.xaml")));
+        var captionStart = theme.IndexOf("x:Key=\"WindowCaptionButtonStyle\"", StringComparison.Ordinal);
+        Assert.True(captionStart >= 0);
+        Assert.DoesNotContain(
+            "SidebarHoverState",
+            theme.Substring(captionStart));
+    }
+
+    [Fact]
     public void NavigationHover_IsSuppressedOnlyWhileWindowMoves()
     {
         var theme = File.ReadAllText(FindRepositoryFile(

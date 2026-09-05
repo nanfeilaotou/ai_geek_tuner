@@ -278,7 +278,7 @@ namespace AIGeekTuner
             // safely remain square without affecting startup.
             WindowCornerController.TryApplyRoundedCorners(this);
             base.OnSourceInitialized(e);
-            _windowChromeHitTestRouter = new WindowChromeHitTestRouter(this);
+            _windowChromeHitTestRouter = new WindowChromeHitTestRouter(this, NavigationItems);
             StartupBreadcrumbLogger.Write(
                 _windowChromeHitTestRouter.IsAttached
                     ? "WINDOW_NATIVE_ROUTER_READY"
