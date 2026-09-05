@@ -1,7 +1,6 @@
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
 using AIGeekTuner.Views.Behaviors;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
@@ -64,13 +63,14 @@ namespace AIGeekTuner
         private readonly AiProviderSettingsViewModel _aiProviderSettingsViewModel;
         private readonly double _normalWidth;
         private readonly double _normalHeight;
+        private WindowChromeHitTestRouter? _windowChromeHitTestRouter;
 
         /// <summary>运行时配置中心；设置页保存后整体换入新快照。</summary>
         internal DiagnosticConfigurationStore ConfigurationStore { get; }
 
         /// <summary>
         /// V2-M4.5A：静态硬件 Inventory 数据底座（不依赖 AIDA64/HWiNFO/LHM）。
-        /// 本轮只提供能力不接 UI；后续 Hardware 详情页消费。
+        /// Dashboard 与 Hardware 详情页共享同一份 startup snapshot。
         /// </summary>
         internal IHardwareInventoryService HardwareInventory { get; }
 
@@ -83,12 +83,16 @@ namespace AIGeekTuner
 
             var applicationDataPaths = ApplicationDataPaths.Default;
             _httpClient = new HttpClient();
-            HardwareInventory = new HardwareInventoryService(
+            var inventoryService = new HardwareInventoryService(
                 new WmiInventorySource(),
                 new DxgiAdapterSource(),
                 new CoreAudioEndpointSource(),
                 new GdiDisplayModeSource(),
                 new WindowsNetworkAdapterSource());
+            HardwareInventory = inventoryService;
+            // 尽早启动唯一一次 static inventory collection；ViewModel 后续复用
+            // 同一 in-flight task，不与 telemetry provider 建立依赖。
+            _ = inventoryService.CollectAsync();
             _filePickerService = new OpenFileDialogService();
             _fileReaderService = new FileReaderService();
             _confirmationDialogService = new MessageBoxConfirmationDialogService();
@@ -261,45 +265,15 @@ namespace AIGeekTuner
         private void CloseButton_Click(object sender, RoutedEventArgs e) =>
             WindowChromeController.Close(this);
 
-        private void Window_SourceInitialized(object? sender, EventArgs e)
+        protected override void OnSourceInitialized(EventArgs e)
         {
             // DWM is optional: unsupported Windows versions and remote sessions
             // safely remain square without affecting startup.
             WindowCornerController.TryApplyRoundedCorners(this);
-        }
-
-        private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
-        {
-            if (e.Handled
-                || e.ChangedButton != MouseButton.Left
-                || Mouse.LeftButton != MouseButtonState.Pressed
-                || !WindowDragHitTest.IsDraggableFrom(e.OriginalSource as DependencyObject, this))
-            {
-                return;
-            }
-
-            if (e.ClickCount == 2)
-            {
-                WindowChromeController.ToggleMaximize(this);
-                e.Handled = true;
-                return;
-            }
-
-            try
-            {
-                DragMove();
-                e.Handled = true;
-            }
-            catch (InvalidOperationException)
-            {
-                // A synthetic/unit-test event may not have an active HWND.
-                // A real WPF window receives the native drag operation here.
-            }
-            finally
-            {
-                Mouse.Capture(null);
-                PostDragInputSynchronizer.Schedule(Dispatcher);
-            }
+            _windowChromeHitTestRouter = new WindowChromeHitTestRouter(this);
+            // WindowChromeWorker subscribes to SourceInitialized; calling base
+            // after our hook installs it deterministically after this router.
+            base.OnSourceInitialized(e);
         }
 
         private void Window_StateChanged(object? sender, EventArgs e)
@@ -351,6 +325,9 @@ namespace AIGeekTuner
 
         protected override void OnClosed(EventArgs e)
         {
+            _windowChromeHitTestRouter?.Dispose();
+            _windowChromeHitTestRouter = null;
+
             // V2-M3.2：先停实时轮询再收尾录制，避免镜像模式下双路径并发。
             _liveTelemetryCoordinator.Stop();
 

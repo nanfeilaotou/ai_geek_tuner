@@ -32,12 +32,14 @@ public sealed class WindowChromeTests
         Assert.Contains("shell:WindowChrome.WindowChrome", xaml);
         Assert.Contains("ResizeBorderThickness=\"0\"", xaml);
         Assert.Contains("CornerRadius=\"8\"", xaml);
-        Assert.Contains("SourceInitialized=\"Window_SourceInitialized\"", xaml);
+        Assert.DoesNotContain("SourceInitialized=\"Window_SourceInitialized\"", xaml);
         Assert.Contains("x:Name=\"TitleBar\"", xaml);
         Assert.Contains("x:Name=\"MinimizeButton\"", xaml);
         Assert.Contains("x:Name=\"MaximizeButton\"", xaml);
         Assert.Contains("x:Name=\"CloseButton\"", xaml);
-        Assert.Contains("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", xaml);
+        Assert.DoesNotContain("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", xaml);
+        Assert.Contains("WindowChromeHitTestRouter", File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs"))));
         Assert.DoesNotContain("WindowDragRegion.IsDragRegion=\"True\"", xaml);
         Assert.DoesNotContain("WindowStyle=\"SingleBorderWindow\"", xaml);
     }
@@ -93,6 +95,11 @@ public sealed class WindowChromeTests
                 window.Show();
                 window.UpdateLayout();
                 window.Dispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(() => { }));
+                var routerField = typeof(MainWindow).GetField(
+                    "_windowChromeHitTestRouter",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                var router = Assert.IsType<WindowChromeHitTestRouter>(routerField?.GetValue(window));
+                Assert.True(router.IsAttached);
                 var frame = Assert.IsType<Frame>(window.FindName("MainFrame"));
                 var dashboardPage = Assert.IsType<AIGeekTuner.Views.Dashboard>(frame.Content);
                 var dashboardTitle = FindVisual<TextBlock>(dashboardPage,
@@ -194,22 +201,61 @@ public sealed class WindowChromeTests
     }
 
     [Fact]
-    public void PostDragInputSynchronizer_SchedulesExactlyOneInputSync()
+    public void NativeHitTestRouter_MapsBackgroundToCaptionAndControlsToClient()
     {
-        var scheduled = 0;
-        var synchronized = 0;
-
-        PostDragInputSynchronizer.Schedule(
-            (priority, callback) =>
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
             {
-                Assert.Equal(DispatcherPriority.Input, priority);
-                scheduled++;
-                callback();
-            },
-            () => synchronized++);
+                var root = new Grid();
+                var background = new Border();
+                var button = new Button();
+                root.Children.Add(background);
+                root.Children.Add(button);
 
-        Assert.Equal(1, scheduled);
-        Assert.Equal(1, synchronized);
+                Assert.Equal(
+                    WindowChromeHitTestRouter.HtCaption,
+                    WindowChromeHitTestRouter.Classify(background, root).ToInt32());
+                Assert.Equal(
+                    WindowChromeHitTestRouter.HtClient,
+                    WindowChromeHitTestRouter.Classify(button, root).ToInt32());
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "native hit-test router test 超时");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void NativeHitTestRouter_LeavesUnrelatedMessagesUntouched()
+    {
+        var router = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs")));
+        Assert.Contains("message == WmNcHitTest", router);
+        Assert.DoesNotContain("WM_SIZE", router);
+        Assert.DoesNotContain("WM_DPICHANGED", router);
+        Assert.DoesNotContain("DragMove", router);
+    }
+
+    [Fact]
+    public void MainWindow_UsesNativeHitTestAndNoWpfDragWorkaround()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml")));
+        var code = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml.cs")));
+
+        Assert.DoesNotContain("PreviewMouseLeftButtonDown", xaml);
+        Assert.DoesNotContain("DragMove", code);
+        Assert.Contains("OnSourceInitialized", code);
+        Assert.Contains("WindowChromeHitTestRouter", code);
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 using AIGeekTuner.Models.Hardware.Inventory;
 using AIGeekTuner.Services.Hardware.Inventory;
+using System.Threading;
 using Xunit;
 
 namespace AIGeekTuner.Tests.Services.Hardware.Inventory
@@ -20,6 +21,55 @@ namespace AIGeekTuner.Tests.Services.Hardware.Inventory
                 }
 
                 return Tables.TryGetValue(wmiClass, out var rows) ? rows : Array.Empty<IInventoryRow>();
+            }
+
+            public byte[]? GetMonitorEdid(string instanceName) => null;
+        }
+
+        private sealed class ProjectingWmiSource : IWmiInventorySource, IProjectedWmiInventorySource
+        {
+            public List<(string ClassName, string? Scope, IReadOnlyCollection<string> Properties)> Queries { get; } = [];
+
+            public IReadOnlyList<IInventoryRow> Query(string wmiClass, string? scope = null) => [];
+
+            public IReadOnlyList<IInventoryRow> QueryProjected(
+                string wmiClass,
+                string? scope,
+                IReadOnlyCollection<string> requiredProperties)
+            {
+                lock (Queries)
+                {
+                    Queries.Add((wmiClass, scope, requiredProperties.ToArray()));
+                }
+                return [];
+            }
+
+            public byte[]? GetMonitorEdid(string instanceName) => null;
+        }
+
+        private sealed class ParallelWmiSource : IWmiInventorySource
+        {
+            private int _active;
+            private int _maxConcurrency;
+
+            public int MaxConcurrency => Volatile.Read(ref _maxConcurrency);
+
+            public IReadOnlyList<IInventoryRow> Query(string wmiClass, string? scope = null)
+            {
+                var active = Interlocked.Increment(ref _active);
+                while (true)
+                {
+                    var currentMax = Volatile.Read(ref _maxConcurrency);
+                    if (active <= currentMax
+                        || Interlocked.CompareExchange(ref _maxConcurrency, active, currentMax) == currentMax)
+                    {
+                        break;
+                    }
+                }
+
+                Thread.Sleep(30);
+                Interlocked.Decrement(ref _active);
+                return [];
             }
 
             public byte[]? GetMonitorEdid(string instanceName) => null;
@@ -134,6 +184,67 @@ namespace AIGeekTuner.Tests.Services.Hardware.Inventory
             Assert.Single(snapshot.AudioDevices);
             Assert.Single(snapshot.Disks);
             Assert.NotEqual(default, snapshot.CollectedAtUtc);
+        }
+
+        [Fact]
+        public async Task CollectAsync_IsSingleFlightForStartupSnapshot()
+        {
+            var service = new HardwareInventoryService(
+                new FakeWmiSource(), new FakeGpuSource(), new FakeAudioSource(),
+                new FakeDisplaySource(), new FakeNetworkSource());
+
+            var first = service.CollectAsync();
+            var second = service.CollectAsync();
+
+            Assert.Same(first, second);
+            await first;
+        }
+
+        [Fact]
+        public async Task IndependentCategories_CollectInParallel()
+        {
+            var wmi = new ParallelWmiSource();
+            var service = new HardwareInventoryService(
+                wmi, new FakeGpuSource(), new FakeAudioSource(),
+                new FakeDisplaySource(), new FakeNetworkSource());
+
+            await service.CollectAsync();
+
+            Assert.True(wmi.MaxConcurrency > 1, "independent inventory categories should overlap");
+        }
+
+        [Fact]
+        public async Task RichInventory_UsesMapperProjectionsInsteadOfSelectStar()
+        {
+            var wmi = new ProjectingWmiSource();
+            var service = new HardwareInventoryService(
+                wmi, new FakeGpuSource(), new FakeAudioSource(),
+                new FakeDisplaySource(), new FakeNetworkSource());
+
+            await service.CollectAsync();
+
+            var processor = Assert.Single(wmi.Queries, query => query.ClassName == "Win32_Processor");
+            Assert.Contains("Name", processor.Properties);
+            Assert.Contains("NumberOfLogicalProcessors", processor.Properties);
+            Assert.DoesNotContain("*", processor.Properties);
+
+            var operatingSystem = Assert.Single(wmi.Queries, query => query.ClassName == "Win32_OperatingSystem");
+            Assert.Contains("Caption", operatingSystem.Properties);
+            Assert.Contains("LastBootUpTime", operatingSystem.Properties);
+            Assert.DoesNotContain("*", operatingSystem.Properties);
+        }
+
+        [Fact]
+        public void WmiProjectionQuery_IsExplicitAndValidated()
+        {
+            var query = WmiInventorySource.BuildSelectQuery(
+                "Win32_Processor",
+                new[] { "Name", "MaxClockSpeed" });
+
+            Assert.Equal("SELECT Name,MaxClockSpeed FROM Win32_Processor", query);
+            Assert.DoesNotContain("*", query);
+            Assert.Throws<ArgumentException>(() =>
+                WmiInventorySource.BuildSelectQuery("Win32_Processor; DROP TABLE X"));
         }
     }
 }

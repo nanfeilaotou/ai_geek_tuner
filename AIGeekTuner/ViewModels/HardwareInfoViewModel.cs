@@ -59,6 +59,8 @@ namespace AIGeekTuner.ViewModels
         private bool _hasLiveCards;
         private bool _hasDashboardDetails;
         private bool _hasInventoryDetail;
+        private bool _isInventoryLoading;
+        private bool _hasInventoryError;
         private string _autoRefreshSummary = "自动刷新已关闭";
         private IReadOnlyList<TelemetryDebugRow> _lastDebugRows = [];
 
@@ -100,6 +102,16 @@ namespace AIGeekTuner.ViewModels
             _refreshSensorsCommand = new AsyncRelayCommand(
                 RefreshSensorsAsync,
                 () => !IsSensorRefreshing);
+
+            if (_hardwareInventoryService is not null)
+            {
+                foreach (var row in DashboardInventoryPresenter.BuildLoadingRows())
+                {
+                    DashboardDetailRows.Add(new InventoryDisplayRowViewModel(row.Label, row.Value));
+                }
+
+                _isInventoryLoading = true;
+            }
 
             _ = LoadAsync();
         }
@@ -183,6 +195,20 @@ namespace AIGeekTuner.ViewModels
             private set => SetProperty(ref _hasInventoryDetail, value);
         }
 
+        /// <summary>Dashboard static inventory startup state; loading keeps the final row shape.</summary>
+        public bool IsInventoryLoading
+        {
+            get => _isInventoryLoading;
+            private set => SetProperty(ref _isInventoryLoading, value);
+        }
+
+        /// <summary>True only when the shared Rich Inventory task genuinely failed.</summary>
+        public bool HasInventoryError
+        {
+            get => _hasInventoryError;
+            private set => SetProperty(ref _hasInventoryError, value);
+        }
+
         public ObservableCollection<HardwareSensorGroupViewModel> SensorGroups { get; } = [];
 
         /// <summary>V2-M1：统一遥测数据源状态（紧凑区）。</summary>
@@ -244,6 +270,9 @@ namespace AIGeekTuner.ViewModels
 
         private async Task LoadAsync()
         {
+            // Rich inventory starts immediately and is independent of the legacy
+            // WMI detection still needed by Hardware/Diagnosis consumers.
+            var inventoryTask = LoadInventoryAsync();
             try
             {
                 var hardware = await _hardwareDetectionService.DetectAsync();
@@ -251,7 +280,6 @@ namespace AIGeekTuner.ViewModels
                 RuntimeStatus = HasKnownData(hardware)
                     ? "真实硬件信息已读取"
                     : "检测完成，但系统未返回可用字段";
-                await LoadInventoryAsync();
             }
             catch
             {
@@ -262,6 +290,9 @@ namespace AIGeekTuner.ViewModels
             }
             finally
             {
+                // The two tasks are deliberately independent; wait here only so
+                // IsLoading describes the complete Hardware page lifecycle.
+                await inventoryTask;
                 IsLoading = false;
             }
         }
@@ -441,6 +472,8 @@ namespace AIGeekTuner.ViewModels
         {
             if (_hardwareInventoryService is null)
             {
+                HasInventoryError = true;
+                IsInventoryLoading = false;
                 return;
             }
 
@@ -451,7 +484,17 @@ namespace AIGeekTuner.ViewModels
             }
             catch
             {
-                // 保持现有展示；inventory 缺席时 Dashboard/Hardware 回退到 legacy 分组。
+                // Legacy rows are permitted only for this genuine Rich Inventory
+                // failure path; normal startup remains on the final Rich shape.
+                HasInventoryError = true;
+                HasDashboardDetails = false;
+                HasInventoryDetail = false;
+                DashboardDetailRows.Clear();
+                InventorySections.Clear();
+            }
+            finally
+            {
+                IsInventoryLoading = false;
             }
         }
 
@@ -498,6 +541,7 @@ namespace AIGeekTuner.ViewModels
             }
 
             HasDashboardDetails = dashboardRows.Length > 0;
+            HasInventoryError = false;
 
             InventorySections.Clear();
             foreach (var section in sections)

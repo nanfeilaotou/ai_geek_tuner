@@ -55,9 +55,20 @@
                     </Grid.RowDefinitions>
                     <TextBlock Text="电脑详细信息" Style="{StaticResource SectionTitleStyle}" Margin="0,0,0,16"/>
                     <Grid Grid.Row="1">
-                        <!-- V2-M4.5B Gate A：静态 Inventory 驱动的固定顺序详情行
-                             （主板/处理器/内存/显卡/显示器/硬盘 + 声卡/网卡条件行）。 -->
+                        <!-- Static Rich Inventory is the only normal presentation.
+                             Loading uses the same final Chinese row shape; the
+                             retired five-row English layout is failure-only. -->
                         <ItemsControl ItemsSource="{Binding Hardware.DashboardDetailRows}">
+                            <ItemsControl.Style>
+                                <Style TargetType="ItemsControl">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding Hardware.HasInventoryError}" Value="True">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </ItemsControl.Style>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Grid>
@@ -78,13 +89,14 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
 
-                        <!-- 兜底：Inventory 不可用时保留原固定行，绝不出现在无数据的空卡片。 -->
+                        <!-- Failure-only compatibility fallback.  It cannot be
+                             visible during ordinary asynchronous startup. -->
                         <Grid>
                             <Grid.Style>
                                 <Style TargetType="Grid">
                                     <Setter Property="Visibility" Value="Visible"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding Hardware.HasDashboardDetails}" Value="True">
+                                        <DataTrigger Binding="{Binding Hardware.HasInventoryError}" Value="False">
                                             <Setter Property="Visibility" Value="Collapsed"/>
                                         </DataTrigger>
                                     </Style.Triggers>

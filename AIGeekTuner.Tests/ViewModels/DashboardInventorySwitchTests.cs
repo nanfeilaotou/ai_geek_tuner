@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,13 +17,8 @@ using Xunit;
 namespace AIGeekTuner.Tests.ViewModels
 {
     /// <summary>
-    /// V2-M4.5C.1 Gate A：Dashboard 启动重叠 bug 的确定性回归测试。
-    ///
-    /// 根因：HasDashboardDetails / HasInventoryDetail 曾是普通 auto-property，
-    /// inventory 完成时不触发 PropertyChanged → Dashboard 兜底 legacy Grid 的
-    /// DataTrigger 永不折叠，旧英文行（CPU/Memory/Motherboard/...）与新 rich
-    /// rows 在同一 Grid 单元内重叠；切页重新绑定后才恢复。修复：两 flag 改为
-    /// SetProperty，且 ApplyInventory 先完整构建新 presentation 再一次性切换。
+    /// V2-M5.2A.3：Dashboard 启动只使用 Rich Inventory presentation。
+    /// Loading 与 ready 共用同一组中文行，避免 legacy 5-row → rich rows 跳变。
     /// </summary>
     public sealed class DashboardInventorySwitchTests
     {
@@ -50,6 +46,16 @@ namespace AIGeekTuner.Tests.ViewModels
             public void Complete(HardwareInventorySnapshot snapshot) => _tcs.SetResult(snapshot);
         }
 
+        private sealed class DelayedDetectionService : IHardwareDetectionService
+        {
+            private readonly TaskCompletionSource<HardwareInfo> _tcs =
+                new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public Task<HardwareInfo> DetectAsync(CancellationToken cancellationToken = default) => _tcs.Task;
+
+            public void Complete() => _tcs.SetResult(new HardwareInfo());
+        }
+
         [Fact]
         public async Task DelayedInventory_Completion_SwitchesAtomicallyWithoutLegacyRows()
         {
@@ -59,9 +65,13 @@ namespace AIGeekTuner.Tests.ViewModels
                 new StubSensorService(),
                 hardwareInventoryService: inventory);
 
-            // 1) 初始：inventory 未完成 → legacy 兜底状态（rich rows 为空、flag false）。
+            // 1) 初始：inventory 未完成 → final Rich row shape 的稳定 loading。
             Assert.False(vm.HasDashboardDetails);
-            Assert.Empty(vm.DashboardDetailRows);
+            Assert.Equal(
+                new[] { "主板", "处理器", "内存", "显卡", "显示器", "硬盘" },
+                vm.DashboardDetailRows.Select(row => row.Label));
+            Assert.True(vm.IsInventoryLoading);
+            Assert.False(vm.HasInventoryError);
             Assert.False(vm.HasInventoryDetail);
             Assert.Empty(vm.InventorySections);
 
@@ -106,6 +116,49 @@ namespace AIGeekTuner.Tests.ViewModels
             Assert.Equal(expectedSections.Length, vm.InventorySections.Count);
         }
 
+        [Fact]
+        public async Task RichInventory_DoesNotWaitForLegacyDetection()
+        {
+            var inventory = new DelayedInventoryService();
+            var detection = new DelayedDetectionService();
+            var vm = new HardwareInfoViewModel(detection, new StubSensorService(), hardwareInventoryService: inventory);
+
+            try
+            {
+                inventory.Complete(CreateSnapshot());
+                await WaitUntilAsync(() => vm.HasDashboardDetails);
+                Assert.True(vm.IsInventoryLoading == false);
+            }
+            finally
+            {
+                detection.Complete();
+            }
+        }
+
+        [Fact]
+        public void LoadingRows_AreTheFinalRichPresentationShape()
+        {
+            var rows = DashboardInventoryPresenter.BuildLoadingRows();
+
+            Assert.Equal(
+                new[] { "主板", "处理器", "内存", "显卡", "显示器", "硬盘" },
+                rows.Select(row => row.Label));
+            Assert.All(rows, row => Assert.Equal("正在读取…", row.Value));
+            Assert.DoesNotContain(rows, row =>
+                row.Label is "CPU" or "GPU" or "Memory" or "Motherboard" or "Operating System");
+        }
+
+        [Fact]
+        public void DashboardXaml_MakesLegacyRowsFailureOnly()
+        {
+            var path = Path.Combine("AIGeekTuner", "Views", "Dashboard.xaml");
+            var xaml = File.ReadAllText(FindRepositoryFile(path));
+
+            Assert.Contains("Hardware.HasInventoryError", xaml);
+            Assert.DoesNotContain("Hardware.HasDashboardDetails", xaml);
+            Assert.Contains("Failure-only compatibility fallback", xaml);
+        }
+
         private static HardwareInventorySnapshot CreateSnapshot() => new(
             Cpu: new CpuInventoryInfo(
                 "Intel Core i9 Test CPU", "GenuineIntel", "x64", 8, 24,
@@ -136,6 +189,23 @@ namespace AIGeekTuner.Tests.ViewModels
 
                 await Task.Delay(10);
             }
+        }
+
+        private static string FindRepositoryFile(string relativePath)
+        {
+            var candidate = AppContext.BaseDirectory;
+            for (var i = 0; i < 6; i++)
+            {
+                var probe = Path.GetFullPath(Path.Combine(candidate, relativePath));
+                if (File.Exists(probe))
+                {
+                    return probe;
+                }
+
+                candidate = Path.GetDirectoryName(candidate)!;
+            }
+
+            throw new FileNotFoundException($"无法定位测试文件 {relativePath}");
         }
     }
 }

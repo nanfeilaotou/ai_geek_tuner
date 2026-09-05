@@ -10,9 +10,7 @@
         Background="{DynamicResource AppBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
-        SourceInitialized="Window_SourceInitialized"
-        StateChanged="Window_StateChanged"
-        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
+        StateChanged="Window_StateChanged">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40"
                             ResizeBorderThickness="0"

@@ -16,6 +16,21 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
         /// <summary>声卡/网卡摘要最多列出的条目数，超出折叠为 "等 N 个设备"。</summary>
         public const int MaxSummaryEntries = 3;
 
+        /// <summary>
+        /// Stable first-frame shape used while the shared inventory snapshot is
+        /// collecting.  It intentionally uses the same Chinese Rich labels as
+        /// the ready presentation and never exposes the retired five-row WMI UI.
+        /// </summary>
+        public static IReadOnlyList<InventoryDisplayRow> BuildLoadingRows() =>
+        [
+            new InventoryDisplayRow("主板", "正在读取…"),
+            new InventoryDisplayRow("处理器", "正在读取…"),
+            new InventoryDisplayRow("内存", "正在读取…"),
+            new InventoryDisplayRow("显卡", "正在读取…"),
+            new InventoryDisplayRow("显示器", "正在读取…"),
+            new InventoryDisplayRow("硬盘", "正在读取…"),
+        ];
+
         public static IReadOnlyList<InventoryDisplayRow> BuildRows(
             HardwareInventorySnapshot snapshot)
         {
