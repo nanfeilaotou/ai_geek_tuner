@@ -32,6 +32,9 @@ namespace AIGeekTuner.Models
 
         public string? ModelName { get; init; }
 
+        /// <summary>V2-M5.1B（Gate L）：产生结果的 Provider 显示名（旧文件缺省 null）。</summary>
+        public string? ProviderName { get; init; }
+
         public long? DurationMs { get; init; }
 
         public string? FailureReason { get; init; }

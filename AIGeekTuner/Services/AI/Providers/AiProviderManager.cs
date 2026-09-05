@@ -1,6 +1,7 @@
 using System.IO;
 using AIGeekTuner.Services.AI.Providers.Configuration;
 using AIGeekTuner.Services.AI.Providers.Credentials;
+using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.AI.Providers.Transport;
 
 namespace AIGeekTuner.Services.AI.Providers
@@ -162,7 +163,8 @@ namespace AIGeekTuner.Services.AI.Providers
             var configuration = new AiProviderConfiguration
             {
                 Version = snapshot.Version,
-                Profiles = profiles
+                Profiles = profiles,
+                ActiveProviderId = snapshot.ActiveProviderId
             };
 
             try
@@ -214,10 +216,23 @@ namespace AIGeekTuner.Services.AI.Providers
                 await _credentials.DeleteAsync(providerId, cancellationToken);
 
                 // 2. 再原子写“少了一个 Provider”的配置；失败则回滚凭据。
+                // 删除的是“当前使用”的 Provider 时清除 ActiveProviderId；
+                // 下一次请求按 fallback 策略重新解析（Gate C）。
+                var activeProviderId = string.Equals(
+                        snapshot.ActiveProviderId,
+                        providerId,
+                        StringComparison.Ordinal)
+                    ? null
+                    : snapshot.ActiveProviderId;
                 try
                 {
                     await _store.SaveAsync(
-                        new AiProviderConfiguration { Version = snapshot.Version, Profiles = remaining },
+                        new AiProviderConfiguration
+                        {
+                            Version = snapshot.Version,
+                            Profiles = remaining,
+                            ActiveProviderId = activeProviderId
+                        },
                         cancellationToken);
                 }
                 catch (Exception)
@@ -280,6 +295,54 @@ namespace AIGeekTuner.Services.AI.Providers
                 Services.Diagnostics.ExceptionLogWriter.Write(
                     rollbackFailure,
                     "AI provider credential rollback");
+            }
+        }
+
+        /// <inheritdoc cref="IAiProviderManager.ResolveActiveProvider" />
+        public AiProviderProfile? ResolveActiveProvider()
+        {
+            return AiActiveProviderResolver.Resolve(_store.Snapshot());
+        }
+
+        /// <inheritdoc cref="IAiProviderManager.SetActiveProviderAsync" />
+        public async Task<AiProviderSaveResult> SetActiveProviderAsync(
+            string providerId,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(providerId))
+            {
+                return AiProviderSaveResult.Fail("Provider ID 不能为空。");
+            }
+
+            var snapshot = _store.Snapshot();
+            var profile = snapshot.Profiles.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, providerId, StringComparison.Ordinal));
+            if (profile is null)
+            {
+                return AiProviderSaveResult.Fail("请先保存 Provider 配置，再设为当前使用。");
+            }
+
+            if (!AiActiveProviderResolver.IsUsable(profile))
+            {
+                return AiProviderSaveResult.Fail(
+                    "该 Provider 未启用或未设置默认模型，无法设为当前使用。");
+            }
+
+            try
+            {
+                await _store.SaveAsync(
+                    new AiProviderConfiguration
+                    {
+                        Version = snapshot.Version,
+                        Profiles = snapshot.Profiles,
+                        ActiveProviderId = profile.Id
+                    },
+                    cancellationToken);
+                return AiProviderSaveResult.Ok();
+            }
+            catch (Exception exception) when (exception is AiProviderStoreException or IOException)
+            {
+                return AiProviderSaveResult.Fail(exception.Message);
             }
         }
 

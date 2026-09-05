@@ -234,82 +234,62 @@
                            Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
 
-            <!-- 01 AI 服务 -->
-            <Border Grid.Row="1" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
+            <!-- 02 AI 服务提供方（V2-M5.1A：Provider 配置；运行时切换在 M5.1B 接入） -->
+            <Border Grid.Row="2" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
                 <StackPanel>
-                    <TextBlock Text="AI 服务" Style="{StaticResource SectionTitleStyle}"/>
-                    <TextBlock Text="本机或局域网 Ollama 服务地址与模型选择"
-                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,4"/>
-                    <TextBlock Text="当前 AI 诊断仍使用此 Ollama 配置；新的 Provider 配置将在后续运行时切换功能接入后生效。"
-                               Style="{StaticResource SettingsHintStyle}" Margin="0,0,0,10"/>
+                    <TextBlock Text="AI 服务提供方" Style="{StaticResource SectionTitleStyle}"/>
+                    <TextBlock Text="「当前使用」的 Provider 将用于 AI 智能诊断与数据会话 AI 分析；「当前编辑」只是设置草稿。"
+                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,10"/>
 
-                    <Border Style="{StaticResource SettingsRowStyle}">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="150"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="服务地址" Style="{StaticResource InfoLabelStyle}"/>
-                            <TextBox Grid.Column="1"
-                                     Style="{StaticResource SettingsInputStyle}"
-                                     Text="{Binding BaseUrl, UpdateSourceTrigger=PropertyChanged}"/>
-                        </Grid>
-                    </Border>
-
-                    <Border Style="{StaticResource SettingsRowStyle}">
-                        <StackPanel>
+                    <StackPanel IsEnabled="{Binding Providers.IsAvailable}">
+                        <!-- V2-M5.1B（Gate M）：当前使用（Active）Provider——下一次 AI 请求实际用谁 -->
+                        <Border Style="{StaticResource SettingsRowStyle}">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="Auto"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="当前模型" Style="{StaticResource InfoLabelStyle}"
+                                <TextBlock Text="当前使用 AI" Style="{StaticResource InfoLabelStyle}"/>
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Providers.ActiveProviderDisplay}"
+                                           Style="{StaticResource StatusTextStyle}"
                                            VerticalAlignment="Center"/>
-                                <ComboBox Grid.Column="1"
-                                          Style="{StaticResource ModelComboStyle}"
-                                          ItemsSource="{Binding AvailableModels}"
-                                          Text="{Binding ModelName, UpdateSourceTrigger=PropertyChanged}"
-                                          ToolTip="{Binding ModelName, UpdateSourceTrigger=PropertyChanged}"
-                                          Margin="0,0,10,0"/>
-                                <Button Grid.Column="2" Content="刷新模型"
-                                        Command="{Binding RefreshModelsCommand}"
-                                        Style="{StaticResource TechButtonStyle}"
-                                        Padding="14,7"/>
+                                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                    <TextBlock Text="● 当前正在使用"
+                                               Foreground="#7BE8A8" FontSize="12" FontWeight="Bold"
+                                               VerticalAlignment="Center" Margin="0,0,8,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Providers.IsEditingProfileActive}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <Button x:Name="ActivateProviderButton"
+                                            Content="设为当前使用"
+                                            Command="{Binding Providers.ActivateCurrentProfileCommand}"
+                                            Padding="12,6"
+                                            ToolTip="把当前编辑的已保存 Provider 设为下一次 AI 请求使用的服务提供方">
+                                        <Button.Style>
+                                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Providers.CanActivateCurrentProfile}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Button.Style>
+                                    </Button>
+                                </StackPanel>
                             </Grid>
-                            <TextBlock Text="可直接输入尚未安装的模型名；刷新不会清除手动输入。"
-                                       Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
-                        </StackPanel>
-                    </Border>
+                        </Border>
 
-                    <Border Padding="0,11,0,0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="150"/>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="Auto"/>
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Text="连接检测" Style="{StaticResource InfoLabelStyle}"/>
-                            <TextBlock Grid.Column="1" Text="{Binding StatusMessage}"
-                                       Style="{StaticResource StatusTextStyle}"
-                                       VerticalAlignment="Center" Margin="0,0,10,0"/>
-                            <Button Grid.Column="2" Content="测试连接"
-                                    Command="{Binding TestConnectionCommand}"
-                                    Style="{StaticResource SecondaryButtonStyle}"
-                                    Padding="16,8"/>
-                        </Grid>
-                    </Border>
-                </StackPanel>
-            </Border>
-
-            <!-- 02 AI 服务提供方（V2-M5.1A：Provider 配置；运行时切换在 M5.1B 接入） -->
-            <Border Grid.Row="2" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,16">
-                <StackPanel>
-                    <TextBlock Text="AI 服务提供方" Style="{StaticResource SectionTitleStyle}"/>
-                    <TextBlock Text="用于配置和测试新的多 Provider 架构；当前不会改变已有诊断任务使用的模型。"
-                               Style="{StaticResource SettingsHintStyle}" Margin="0,4,0,10"/>
-
-                    <StackPanel IsEnabled="{Binding Providers.IsAvailable}">
                         <!-- 选择 / 添加 / 删除 -->
                         <Border Style="{StaticResource SettingsRowStyle}">
                             <Grid>
@@ -631,24 +611,6 @@
                                     <ColumnDefinition Width="150"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="严格 JSON 输出" Style="{StaticResource InfoLabelStyle}"/>
-                                <ToggleButton Grid.Column="1"
-                                              IsChecked="{Binding UseJsonFormat}"
-                                              Style="{StaticResource SettingsToggleStyle}"
-                                              HorizontalAlignment="Left"/>
-                            </Grid>
-                            <TextBlock Text="提高本地模型结构化诊断结果的稳定性。"
-                                       Style="{StaticResource SettingsHintStyle}" Margin="150,6,0,0"/>
-                        </StackPanel>
-                    </Border>
-
-                    <Border Style="{StaticResource SettingsRowStyle}">
-                        <StackPanel>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="150"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
                                 <TextBlock Text="录制采样间隔" Style="{StaticResource InfoLabelStyle}"/>
                                 <ComboBox Grid.Column="1" HorizontalAlignment="Left" MinWidth="140"
                                           x:Name="RecordingIntervalCombo"
@@ -848,6 +810,11 @@
 
             <!-- 底部保存区 -->
             <Grid Grid.Row="6" Margin="0,18,0,0">
+                <!-- V2-M5.1B（Gate N）：保存状态展示从已移除的旧 Ollama 卡片迁移到这里。 -->
+                <TextBlock Text="{Binding StatusMessage}"
+                           Style="{StaticResource StatusTextStyle}"
+                           HorizontalAlignment="Left" VerticalAlignment="Center"
+                           Margin="0,0,150,0"/>
                 <Button Content="保存设置"
                         Command="{Binding SaveCommand}"
                         Style="{StaticResource TechButtonStyle}"

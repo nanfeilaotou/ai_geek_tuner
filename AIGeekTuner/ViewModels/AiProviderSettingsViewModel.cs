@@ -84,6 +84,12 @@ namespace AIGeekTuner.ViewModels
         private bool _isSaving;
 
         private bool _hasUnsavedChanges;
+
+        // ---- V2-M5.1B（Gate M）：Active Provider（“当前使用”）状态 ----
+        private string _activeProviderDisplay = "尚未配置";
+        private bool _isEditingProfileActive;
+        private bool _canActivateCurrentProfile;
+
         private string _statusMessage = "选择或添加一个 Provider 开始配置。";
         private SettingsStatusKind _statusKind = SettingsStatusKind.Info;
         private string _structuredProbeText = string.Empty;
@@ -98,6 +104,7 @@ namespace AIGeekTuner.ViewModels
         private readonly AsyncRelayCommand _deleteProviderCommand;
         private readonly RelayCommand _beginKeyUpdateCommand;
         private readonly RelayCommand _clearKeyCommand;
+        private readonly AsyncRelayCommand _activateCurrentProfileCommand;
 
         public AiProviderSettingsViewModel(
             IAiProviderManager? manager,
@@ -116,6 +123,7 @@ namespace AIGeekTuner.ViewModels
             _deleteProviderCommand = new AsyncRelayCommand(DeleteAsync, () => !IsSaving);
             _beginKeyUpdateCommand = new RelayCommand(BeginKeyUpdate);
             _clearKeyCommand = new RelayCommand(MarkKeyPendingClear);
+            _activateCurrentProfileCommand = new AsyncRelayCommand(ActivateCurrentProfileAsync);
             _createOllamaProviderCommand = new RelayCommand(
                 () => StartCreateProvider(AiProviderCreationPreset.Ollama));
             _createLmStudioProviderCommand = new RelayCommand(
@@ -256,6 +264,31 @@ namespace AIGeekTuner.ViewModels
         }
 
         public bool HasSelection => SelectedItem is not null;
+
+        // ---- V2-M5.1B（Gate M）：“当前使用”的 Provider 状态 ----
+
+        /// <summary>“当前使用 AI”展示行，例如 “LM Studio · qwen2.5-coder:14b”；无可用 Provider 时为“尚未配置”。</summary>
+        public string ActiveProviderDisplay
+        {
+            get => _activeProviderDisplay;
+            private set => SetProperty(ref _activeProviderDisplay, value);
+        }
+
+        /// <summary>当前编辑的已保存 profile 就是 Active Provider（XAML 显示“● 当前正在使用”）。</summary>
+        public bool IsEditingProfileActive
+        {
+            get => _isEditingProfileActive;
+            private set => SetProperty(ref _isEditingProfileActive, value);
+        }
+
+        /// <summary>当前编辑的是已保存 profile 且不是 Active（XAML 显示“设为当前使用”按钮）。</summary>
+        public bool CanActivateCurrentProfile
+        {
+            get => _canActivateCurrentProfile;
+            private set => SetProperty(ref _canActivateCurrentProfile, value);
+        }
+
+        public System.Windows.Input.ICommand ActivateCurrentProfileCommand => _activateCurrentProfileCommand;
 
         public bool HasStoredCredential => _baselineHasCredential;
 
@@ -402,6 +435,7 @@ namespace AIGeekTuner.ViewModels
         {
             OnPropertyChanged(nameof(HasSelection));
             OnPropertyChanged(nameof(KindDisplay));
+            RefreshActiveProviderState();
 
             if (item is null)
             {
@@ -582,6 +616,60 @@ namespace AIGeekTuner.ViewModels
             OnPropertyChanged(nameof(SelectedItem));
             OnPropertyChanged(nameof(HasSelection));
             OnSelectionChanged(_selectedItem);
+            RefreshActiveProviderState();
+        }
+
+        /// <summary>从 manager 重读 Active Provider 解析结果并刷新相关展示属性。</summary>
+        private void RefreshActiveProviderState()
+        {
+            var resolved = _manager?.ResolveActiveProvider();
+            ActiveProviderDisplay = resolved is null
+                ? "尚未配置"
+                : resolved.DisplayName + " · " + resolved.DefaultModelId;
+
+            var editingId = SelectedItem?.ExistingProfileId;
+            IsEditingProfileActive = editingId is not null
+                && string.Equals(editingId, resolved?.Id, StringComparison.Ordinal);
+            CanActivateCurrentProfile = editingId is not null && !IsEditingProfileActive;
+        }
+
+        /// <summary>
+        /// 把当前编辑的“已保存 profile”设为当前使用（Gate M Activation）。
+        /// 草稿未保存（新建或脏）时绝不生效；激活的必须是已保存成功的 profile。
+        /// </summary>
+        private async Task ActivateCurrentProfileAsync()
+        {
+            if (_manager is null || SelectedItem?.ExistingProfileId is null)
+            {
+                SetStatus(SettingsStatusKind.Warning, "请先选择一个已保存的 Provider。");
+                return;
+            }
+
+            if (HasUnsavedChanges)
+            {
+                SetStatus(SettingsStatusKind.Warning, "请先保存 Provider 配置，再设为当前使用。");
+                return;
+            }
+
+            var providerId = SelectedItem.ExistingProfileId;
+            try
+            {
+                var result = await _manager.SetActiveProviderAsync(providerId);
+                if (!result.Success)
+                {
+                    SetStatus(SettingsStatusKind.Error, result.Error ?? "设置当前使用失败，请稍后重试。");
+                    return;
+                }
+
+                RefreshActiveProviderState();
+                var displayName = _manager.GetProfile(providerId)?.DisplayName ?? providerId;
+                SetStatus(SettingsStatusKind.Success, "已将 " + displayName + " 设为当前使用的 AI 服务提供方。");
+            }
+            catch (Exception exception)
+            {
+                ExceptionLogWriter.Write(exception, "AiProviderSettings.Activate");
+                SetStatus(SettingsStatusKind.Error, "设置当前使用失败，请稍后重试。");
+            }
         }
 
         private string GenerateUniqueId(string baseId)

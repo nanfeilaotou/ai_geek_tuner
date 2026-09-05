@@ -7,6 +7,7 @@ using AIGeekTuner.Services.AI;
 using AIGeekTuner.Services.AI.Providers;
 using AIGeekTuner.Services.AI.Providers.Configuration;
 using AIGeekTuner.Services.AI.Providers.Credentials;
+using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.AI.Providers.Transport;
 using AIGeekTuner.Services.Diagnosis;
 using AIGeekTuner.Services.Dialogs;
@@ -129,10 +130,6 @@ namespace AIGeekTuner
                 liveTelemetry.Start(startupSettings.HardwareRefreshIntervalMs);
             }
 
-            var aiService = new OllamaService(
-                _httpClient,
-                () => ConfigurationStore.Snapshot().Ollama,
-                new DiagnosticResultParser());
             _connectionService = new OllamaConnectionService(_httpClient);
 
             // V2-M5.1A：Provider Foundation 服务栈——目前只被设置页的 Provider 卡片使用；
@@ -152,6 +149,20 @@ namespace AIGeekTuner
                 providerCredentialStore,
                 new OpenAiCompatibleClient(_httpClient),
                 new OllamaNativeClient(_httpClient));
+
+            // V2-M5.1B：统一 AI Runtime Routing（Gate D/F）。
+            // “当前使用”的已保存 Provider 决定 Diagnosis / SessionAnalysis 的真实传输；
+            // 快照在每次 AI 请求开始时捕获一次，请求期间 Provider/模型/超时如何变化都互不影响。
+            var runtimeSnapshotSource = new AiRuntimeSnapshotSource(
+                aiProviderStore,
+                providerCredentialStore);
+            var chatTransportDispatcher = new AiChatTransportDispatcher(
+                new OllamaNativeChatTransport(_httpClient),
+                new OpenAiCompatibleChatTransport(_httpClient));
+            var aiChatRuntime = new AiChatRuntime(
+                runtimeSnapshotSource,
+                chatTransportDispatcher,
+                _connectionService);
             var aiProviderSettingsViewModel = new AiProviderSettingsViewModel(
                 aiProviderManager,
                 _confirmationDialogService,
@@ -159,7 +170,6 @@ namespace AIGeekTuner
 
             _settingsViewModel = new SettingsViewModel(
                 _applicationSettingsService,
-                _connectionService,
                 ConfigurationStore,
                 _localDataDirectoryService,
                 _telemetryHub,
@@ -168,13 +178,17 @@ namespace AIGeekTuner
             // V2-M3：Session AI（复用现有 HttpClient 与配置快照原则）+ GPT-SoVITS。
             // 注意：须在 ConfigurationStore/_applicationSettingsService 赋值之后创建，
             // 否则可空流分析（CS8602）会认为 lambda 捕获了未初始化的只读属性。
+            // V2-M5.1B：分析请求走 provider-aware transport；超时取当前全局设置快照（Gate O）。
             var analysisChatClient = new OllamaChatClient(
                 _httpClient,
-                () => ConfigurationStore.Snapshot().Ollama);
+                () => ConfigurationStore.Snapshot().Ollama,
+                chatTransportDispatcher);
             var analysisService = new OllamaSessionAnalysisService(
                 analysisChatClient,
                 new SessionAnalysisPromptBuilder(),
-                modelNameProvider: () => ConfigurationStore.Snapshot().Ollama.ModelName);
+                modelNameProvider: () => ConfigurationStore.Snapshot().Ollama.ModelName,
+                runtimeProvider: async () => await runtimeSnapshotSource.TryCaptureAsync(
+                    ConfigurationStore.Snapshot().Ollama.TimeoutSeconds));
             var analysisStore = new SessionAnalysisStore(applicationDataPaths.SessionsDirectory);
 
             // V2-M4.2：Windows Incident correlation（录制结束后的独立证据采集阶段）。
@@ -214,9 +228,10 @@ namespace AIGeekTuner
                 incidentStore);
 
             var safetyService = new SafetyGuardService();
+            // V2-M5.1B：诊断请求经 AiChatRuntime 走“当前使用”的 Provider；
+            // PromptBuilder / Parser / repair 语义 / SafetyGuard 全部保持原实现。
             _diagnosisService = new DiagnosisService(
-                aiService,
-                new OllamaAiReadinessService(_connectionService),
+                aiChatRuntime,
                 new DiagnosisPromptBuilder(() => ConfigurationStore.Snapshot().Input),
                 safetyService);
 

@@ -6,7 +6,10 @@ using AIGeekTuner.Services.Diagnostics;
 
 namespace AIGeekTuner.Services.Telemetry.Recording
 {
-    /// <summary>analysis.json 信封：deterministic session.json 保持稳定，AI 结果独立持久化（§24/§25）。</summary>
+    /// <summary>
+    /// analysis.json 信封：deterministic session.json 保持稳定，AI 结果独立持久化（§24/§25）。
+    /// V2-M5.1B（Gate L）：additive ProviderId / ProviderName（旧文件缺省 null，向后兼容）。
+    /// </summary>
     public sealed record SessionAnalysisEnvelope(
         int SchemaVersion,
         string SessionId,
@@ -15,7 +18,9 @@ namespace AIGeekTuner.Services.Telemetry.Recording
         long DurationMs,
         bool RepairUsed,
         SessionAnalysisResult Result,
-        string ContextJson);
+        string ContextJson,
+        string? ProviderId = null,
+        string? ProviderName = null);
 
     public interface ISessionAnalysisStore
     {

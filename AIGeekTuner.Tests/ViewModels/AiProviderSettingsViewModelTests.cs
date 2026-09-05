@@ -3,6 +3,7 @@ using AIGeekTuner.Configuration;
 using AIGeekTuner.Services.AI.Providers;
 using AIGeekTuner.Services.AI.Providers.Configuration;
 using AIGeekTuner.Services.AI.Providers.Credentials;
+using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.AI.Providers.Transport;
 using AIGeekTuner.Services.Dialogs;
 using AIGeekTuner.Tests.Services.AI.Providers;
@@ -811,6 +812,23 @@ internal sealed class FakeAiProviderManager : IAiProviderManager
         DeleteCalls.Add(providerId);
         Profiles.RemoveAll(profile => profile.Id == providerId);
         return Task.FromResult(AiProviderSaveResult.Ok());
+    }
+
+    public AiProviderProfile? ActiveOverride { get; set; }
+
+    public List<string> SetActiveCalls { get; } = [];
+
+    public AiProviderSaveResult NextSetActiveResult { get; set; } = AiProviderSaveResult.Ok();
+
+    public AiProviderProfile? ResolveActiveProvider() =>
+        ActiveOverride ?? Profiles.FirstOrDefault(profile => profile.Enabled
+            && !string.IsNullOrWhiteSpace(profile.DefaultModelId));
+
+    public Task<AiProviderSaveResult> SetActiveProviderAsync(
+        string providerId, CancellationToken cancellationToken = default)
+    {
+        SetActiveCalls.Add(providerId);
+        return Task.FromResult(NextSetActiveResult);
     }
 }
 

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using AIGeekTuner.Models.Incidents;
 using AIGeekTuner.Services.SessionAnalysis;
+using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.Telemetry.Recording;
 using Xunit;
 
@@ -121,7 +122,7 @@ namespace AIGeekTuner.Tests.Services.SessionAnalysis
         {
             public int Requests { get; private set; }
             public List<string> Users { get; } = [];
-            public Task<string> ChatAsync(string systemPrompt, string userPrompt,
+            public Task<string> ChatAsync(AiRuntimeSnapshot? runtime, string systemPrompt, string userPrompt,
                 string? formatJsonSchema, bool? think, CancellationToken cancellationToken)
             {
                 Requests++;

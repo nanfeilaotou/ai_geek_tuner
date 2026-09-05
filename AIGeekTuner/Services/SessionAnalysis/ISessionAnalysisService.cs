@@ -18,7 +18,10 @@ namespace AIGeekTuner.Services.SessionAnalysis
         TimeSpan Duration,
         string ModelName,
         bool RepairUsed,
-        string? EvidenceContextJson = null);
+        string? EvidenceContextJson = null,
+        // ---- V2-M5.1B（Gate L）：实际使用的 Provider 元数据（additive；旧调用缺省 null） ----
+        string? ProviderId = null,
+        string? ProviderName = null);
 
     /// <summary>
     /// 独立的 Session AI 分析服务（§4）：只接受组合后的有界确定性证据上下文，

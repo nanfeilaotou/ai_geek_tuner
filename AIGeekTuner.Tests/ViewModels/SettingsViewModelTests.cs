@@ -1,6 +1,5 @@
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
-using AIGeekTuner.Services.AI;
 using AIGeekTuner.Services.Settings;
 using AIGeekTuner.Tests.TestSupport;
 using AIGeekTuner.ViewModels;
@@ -9,14 +8,13 @@ using Xunit;
 namespace AIGeekTuner.Tests.ViewModels;
 
 /// <summary>
-/// SettingsViewModel 关键逻辑：草稿加载、保存校验与快照替换、
-/// 模型刷新不覆盖手输、三态连接反馈、保存期重入保护。
+/// SettingsViewModel 关键逻辑（V2-M5.1B 后）：草稿加载、保存校验与快照替换、
+/// 旧 Ollama 字段的数据兼容（UI 已移除但持久化保留）、保存期重入保护。
 /// </summary>
 public class SettingsViewModelTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
     private readonly FakeSettingsService _settingsService = new();
-    private readonly FakeConnectionService _connectionService = new();
     private readonly DiagnosticConfigurationStore _store =
         new(new DiagnosticConfiguration(new OllamaOptions(), new DiagnosisInputOptions()));
 
@@ -34,11 +32,8 @@ public class SettingsViewModelTests : IDisposable
         });
         var viewModel = CreateViewModel();
 
-        Assert.Equal("http://192.168.1.50:11434", viewModel.BaseUrl);
-        Assert.Equal("llama3.1:8b", viewModel.ModelName);
         Assert.Equal("600", viewModel.TimeoutSecondsText);
         Assert.Equal("8,000", viewModel.MaxLogLengthText);
-        Assert.False(viewModel.UseJsonFormat);
         Assert.False(viewModel.AutoSaveDiagnosisHistory);
     }
 
@@ -46,34 +41,40 @@ public class SettingsViewModelTests : IDisposable
     public async Task Save_Success_PersistsSwapsStoreAndReportsSuccess()
     {
         var viewModel = CreateViewModel();
-        viewModel.BaseUrl = "http://192.168.1.50:11434";
-        viewModel.ModelName = "llama3.1:8b";
         viewModel.TimeoutSecondsText = "600";
         viewModel.MaxLogLengthText = "8000";
-        viewModel.UseJsonFormat = false;
 
         await viewModel.SaveCommand.ExecuteAsync();
 
         var saved = Assert.Single(_settingsService.SavedValues);
-        Assert.Equal("llama3.1:8b", saved.OllamaModelName);
-        Assert.False(saved.UseJsonFormat);
-        Assert.Equal("llama3.1:8b", _store.Snapshot().Ollama.ModelName);
-        Assert.False(_store.Snapshot().Ollama.UseJsonFormat);
+        Assert.Equal(600, saved.OllamaTimeoutSeconds);
+        Assert.Equal(8000, saved.MaxFaultLogCharacters);
+        Assert.Equal(600, _store.Snapshot().Ollama.TimeoutSeconds);
         Assert.Equal(SettingsStatusKind.Success, viewModel.StatusKind);
     }
 
     [Fact]
-    public async Task Save_InvalidBaseUrl_ShowsErrorWithoutSideEffects()
+    public async Task Save_PreservesLegacyOllamaFields_NoLongerEditableInUi()
     {
+        // Gate N：旧 Ollama 字段从 UI 移除，但保存时必须原样保留（升级兼容），
+        // 且 ConfigurationStore 快照继续携带它们（legacy 读取方不破）。
+        _settingsService.Load(new ApplicationSettings
+        {
+            OllamaBaseUrl = "http://192.168.1.50:11434",
+            OllamaModelName = "llama3.1:8b",
+            UseJsonFormat = false
+        });
         var viewModel = CreateViewModel();
-        viewModel.BaseUrl = "not-a-url";
 
         await viewModel.SaveCommand.ExecuteAsync();
 
-        Assert.Equal(SettingsStatusKind.Warning, viewModel.StatusKind);
-        Assert.Contains("服务地址", viewModel.StatusMessage);
-        Assert.Empty(_settingsService.SavedValues);
-        Assert.Equal(OllamaOptions.DefaultModelName, _store.Snapshot().Ollama.ModelName);
+        var saved = Assert.Single(_settingsService.SavedValues);
+        Assert.Equal("http://192.168.1.50:11434", saved.OllamaBaseUrl);
+        Assert.Equal("llama3.1:8b", saved.OllamaModelName);
+        Assert.False(saved.UseJsonFormat);
+        Assert.Equal("http://192.168.1.50:11434", _store.Snapshot().Ollama.BaseUrl);
+        Assert.Equal("llama3.1:8b", _store.Snapshot().Ollama.ModelName);
+        Assert.False(_store.Snapshot().Ollama.UseJsonFormat);
     }
 
     [Fact]
@@ -87,62 +88,6 @@ public class SettingsViewModelTests : IDisposable
         Assert.Contains("整数", viewModel.StatusMessage);
         Assert.Empty(_settingsService.SavedValues);
     }
-
-    [Fact]
-    public async Task RefreshModels_FillsListAndKeepsManuallyTypedModelName()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.ModelName = "my-future-model";
-
-        await viewModel.RefreshModelsCommand.ExecuteAsync();
-
-        Assert.Equal(2, viewModel.AvailableModels.Count);
-        Assert.Equal("my-future-model", viewModel.ModelName);
-    }
-
-    [Fact]
-    public async Task RefreshModels_Offline_ShowsFriendlyWarning()
-    {
-        var viewModel = CreateViewModel();
-        _connectionService.OnGetModelsException =
-            new OllamaConnectionException("Ollama 服务未启动或无法连接。");
-
-        await viewModel.RefreshModelsCommand.ExecuteAsync();
-
-        Assert.Equal(SettingsStatusKind.Warning, viewModel.StatusKind);
-        Assert.Contains("未启动或无法连接", viewModel.StatusMessage);
-    }
-
-    [Fact]
-    public async Task TestConnection_ModelMissing_ShowsWarningWithModelName()
-    {
-        var viewModel = CreateViewModel();
-        viewModel.ModelName = "gemma2:9b";
-        _connectionService.ReadinessResult = new OllamaReadinessResult(
-            OllamaReadinessStatus.ModelMissing,
-            "已连接 Ollama，但未找到模型 gemma2:9b。请先执行 ollama pull 或刷新模型列表。",
-            ["qwen3:8b"]);
-
-        await viewModel.TestConnectionCommand.ExecuteAsync();
-
-        Assert.Equal(SettingsStatusKind.Warning, viewModel.StatusKind);
-        Assert.Contains("未找到模型 gemma2:9b", viewModel.StatusMessage);
-    }
-
-    [Fact]
-    public async Task TestConnection_Offline_ShowsErrorStatus()
-    {
-        var viewModel = CreateViewModel();
-        _connectionService.ReadinessResult = new OllamaReadinessResult(
-            OllamaReadinessStatus.ServiceUnavailable,
-            "Ollama 服务未启动或无法连接。",
-            []);
-
-        await viewModel.TestConnectionCommand.ExecuteAsync();
-
-        Assert.Equal(SettingsStatusKind.Error, viewModel.StatusKind);
-    }
-
     [Fact]
     public async Task Save_WhileSaving_IgnoresSecondInvocation()
     {
@@ -172,7 +117,6 @@ public class SettingsViewModelTests : IDisposable
     private SettingsViewModel CreateViewModel() =>
         new(
             _settingsService,
-            _connectionService,
             _store,
             new FakeDataDirectoryService(_temp.Combine("data")));
 
@@ -200,36 +144,6 @@ public class SettingsViewModelTests : IDisposable
 
             SavedValues.Add(settings);
             Current = settings;
-        }
-    }
-
-    private sealed class FakeConnectionService : IOllamaConnectionService
-    {
-        public OllamaReadinessResult ReadinessResult { get; set; } =
-            new(OllamaReadinessStatus.Ready, "Ollama 已就绪 · qwen3:8b", ["qwen3:8b"]);
-
-        public IReadOnlyList<string> Models { get; set; } = ["qwen3:8b", "llama3.1:8b"];
-
-        public Exception? OnGetModelsException;
-
-        public Task<OllamaReadinessResult> CheckReadinessAsync(
-            string baseUrl,
-            string modelName,
-            CancellationToken cancellationToken = default)
-        {
-            return Task.FromResult(ReadinessResult);
-        }
-
-        public Task<IReadOnlyList<string>> GetModelsAsync(
-            string baseUrl,
-            CancellationToken cancellationToken = default)
-        {
-            if (OnGetModelsException is not null)
-            {
-                throw OnGetModelsException;
-            }
-
-            return Task.FromResult(Models);
         }
     }
 

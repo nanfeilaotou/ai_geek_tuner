@@ -113,7 +113,6 @@ public class PageConstructionSmokeTests
 
                 var settingsViewModel = new SettingsViewModel(
                     new FakeSettingsServiceForSmoke(),
-                    new FakeConnectionServiceForSmoke(),
                     new DiagnosticConfigurationStore(new DiagnosticConfiguration(
                         new OllamaOptions(), new DiagnosisInputOptions())),
                     new FakeDataDirectoryServiceForSmoke(temp.FullPath),

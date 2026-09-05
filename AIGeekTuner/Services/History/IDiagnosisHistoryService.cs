@@ -4,12 +4,13 @@ namespace AIGeekTuner.Services.History
 {
     public interface IDiagnosisHistoryService
     {
-        /// <summary>保存一次成功诊断（含本次使用的模型与耗时）。</summary>
+        /// <summary>保存一次成功诊断（含本次使用的模型、Provider 与耗时）。</summary>
         Task<DiagnosisRecord> SaveSuccessAsync(
             DiagnosisOutcome outcome,
             string modelName,
             long durationMs,
-            CancellationToken cancellationToken);
+            CancellationToken cancellationToken,
+            string? providerName = null);
 
         /// <summary>保存一次失败诊断（仅保留用户可读的原因与元数据，不伪造结果）。</summary>
         Task<DiagnosisRecord> SaveFailureAsync(

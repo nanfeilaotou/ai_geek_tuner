@@ -58,6 +58,21 @@ namespace AIGeekTuner.Services.AI.Providers
         Task<AiProviderSaveResult> DeleteProfileAsync(
             string providerId,
             CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// 解析“当前使用”的 Provider（M5.1B，Gate B/C）：“当前编辑”只影响设置草稿，
+        /// 这里返回的才是下一次 AI 请求实际使用的已保存 profile。
+        /// 策略：显式 ActiveProviderId → 迁移出的 ollama profile → 第一个合法 Enabled profile → null。
+        /// </summary>
+        AiProviderProfile? ResolveActiveProvider();
+
+        /// <summary>
+        /// 把一个已经保存的 profile 设为“当前使用”：原子持久化 ActiveProviderId。
+        /// 禁止对未保存草稿 / 未启用 / 缺默认模型的 profile 生效；下次请求立即生效，无需重启。
+        /// </summary>
+        Task<AiProviderSaveResult> SetActiveProviderAsync(
+            string providerId,
+            CancellationToken cancellationToken = default);
     }
 
     public sealed record AiProviderSaveResult(bool Success, string? Error = null)

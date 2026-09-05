@@ -18,5 +18,11 @@ namespace AIGeekTuner.Services.Diagnosis
         }
 
         public DiagnosisError Error { get; }
+
+        // ---- V2-M5.1B（Gate L）：失败发生时已知的运行时元数据；快照尚未建立时为 null。 ----
+
+        public string? ModelName { get; init; }
+
+        public string? ProviderName { get; init; }
     }
 }

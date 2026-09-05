@@ -2,7 +2,6 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
-using AIGeekTuner.Services.AI;
 using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Settings;
 using AIGeekTuner.Services.Telemetry;
@@ -24,7 +23,6 @@ namespace AIGeekTuner.ViewModels
     public sealed class SettingsViewModel : ViewModelBase
     {
         private readonly IApplicationSettingsService _settingsService;
-        private readonly IOllamaConnectionService _connectionService;
         private readonly DiagnosticConfigurationStore _configurationStore;
         private readonly ILocalDataDirectoryService _localDataDirectoryService;
         private readonly ITelemetryHub? _telemetryHub;
@@ -36,46 +34,37 @@ namespace AIGeekTuner.ViewModels
         private string _dataSourceStatusLine = "正在检测硬件数据源...";
 
         private readonly AsyncRelayCommand _saveCommand;
-        private readonly AsyncRelayCommand _refreshModelsCommand;
-        private readonly AsyncRelayCommand _testConnectionCommand;
 
-        private string _baseUrl;
-        private string _modelName;
+        // V2-M5.1B（Gate N）：旧 Ollama 专属的 BaseUrl / 模型 / 刷新模型 / 测试连接
+        // 已从用户可见 UI 移除——由“AI 服务提供方”卡片的 Provider 配置取代。
+        // 旧持久化字段（OllamaBaseUrl / OllamaModelName / UseJsonFormat）保留兼容，保存时原样带回。
         private string _timeoutSecondsText;
         private string _maxLogLengthText;
-        private bool _useJsonFormat;
         private bool _autoSaveDiagnosisHistory;
 
         private bool _isSaving;
-        private bool _isLoadingModels;
-        private bool _isTestingConnection;
 
         private string _statusMessage = "更改完成后点击“保存设置”。连接检测与保存互不影响。";
         private SettingsStatusKind _statusKind = SettingsStatusKind.Info;
 
         public SettingsViewModel(
             IApplicationSettingsService settingsService,
-            IOllamaConnectionService connectionService,
             DiagnosticConfigurationStore configurationStore,
             ILocalDataDirectoryService localDataDirectoryService,
             ITelemetryHub? telemetryHub = null,
             AiProviderSettingsViewModel? providers = null)
         {
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
-            _connectionService = connectionService ?? throw new ArgumentNullException(nameof(connectionService));
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
             _localDataDirectoryService = localDataDirectoryService ?? throw new ArgumentNullException(nameof(localDataDirectoryService));
             _telemetryHub = telemetryHub;
 
-            // V2-M5.1A：Provider 配置卡片（独立于旧 Ollama runtime 设置；未注入时降级展示）。
+            // V2-M5.1A：Provider 配置卡片（“当前使用”Provider 决定真实 AI runtime）。
             Providers = providers ?? AiProviderSettingsViewModel.CreateUnavailable();
 
             var current = settingsService.Current;
-            _baseUrl = current.OllamaBaseUrl;
-            _modelName = current.OllamaModelName;
             _timeoutSecondsText = current.OllamaTimeoutSeconds.ToString();
             _maxLogLengthText = current.MaxFaultLogCharacters.ToString("N0");
-            _useJsonFormat = current.UseJsonFormat;
             _autoSaveDiagnosisHistory = current.AutoSaveDiagnosisHistory;
             RecordingIntervalMs = current.RecordingIntervalMs;
             VoiceEnabled = current.Voice.Enabled;
@@ -87,8 +76,6 @@ namespace AIGeekTuner.ViewModels
                 "0.0##", System.Globalization.CultureInfo.InvariantCulture);
 
             _saveCommand = new AsyncRelayCommand(SaveAsync, () => !IsSaving);
-            _refreshModelsCommand = new AsyncRelayCommand(RefreshModelsAsync, () => !IsLoadingModels);
-            _testConnectionCommand = new AsyncRelayCommand(TestConnectionAsync, () => !IsTestingConnection);
             OpenDataDirectoryCommand = new RelayCommand(OpenDataDirectory);
             _refreshDataSourcesCommand = new AsyncRelayCommand(
                 RefreshDataSourceStatusesAsync,
@@ -164,18 +151,6 @@ namespace AIGeekTuner.ViewModels
             }
         }
 
-        public string BaseUrl
-        {
-            get => _baseUrl;
-            set => SetProperty(ref _baseUrl, value);
-        }
-
-        public string ModelName
-        {
-            get => _modelName;
-            set => SetProperty(ref _modelName, value);
-        }
-
         public string TimeoutSecondsText
         {
             get => _timeoutSecondsText;
@@ -186,12 +161,6 @@ namespace AIGeekTuner.ViewModels
         {
             get => _maxLogLengthText;
             set => SetProperty(ref _maxLogLengthText, value);
-        }
-
-        public bool UseJsonFormat
-        {
-            get => _useJsonFormat;
-            set => SetProperty(ref _useJsonFormat, value);
         }
 
         public bool AutoSaveDiagnosisHistory
@@ -214,8 +183,6 @@ namespace AIGeekTuner.ViewModels
         /// <summary>语速文本（0.7–1.3），保存时统一解析与校验。</summary>
         public string VoiceSpeedFactorText { get; set; } = "1.0";
 
-        public ObservableCollection<string> AvailableModels { get; } = [];
-
         public string LocalDataDirectory => _localDataDirectoryService.DirectoryPath;
 
         public bool IsSaving
@@ -226,30 +193,6 @@ namespace AIGeekTuner.ViewModels
                 if (SetProperty(ref _isSaving, value))
                 {
                     _saveCommand.NotifyCanExecuteChanged();
-                }
-            }
-        }
-
-        public bool IsLoadingModels
-        {
-            get => _isLoadingModels;
-            private set
-            {
-                if (SetProperty(ref _isLoadingModels, value))
-                {
-                    _refreshModelsCommand.NotifyCanExecuteChanged();
-                }
-            }
-        }
-
-        public bool IsTestingConnection
-        {
-            get => _isTestingConnection;
-            private set
-            {
-                if (SetProperty(ref _isTestingConnection, value))
-                {
-                    _testConnectionCommand.NotifyCanExecuteChanged();
                 }
             }
         }
@@ -268,10 +211,6 @@ namespace AIGeekTuner.ViewModels
 
         public AsyncRelayCommand SaveCommand => _saveCommand;
 
-        public AsyncRelayCommand RefreshModelsCommand => _refreshModelsCommand;
-
-        public AsyncRelayCommand TestConnectionCommand => _testConnectionCommand;
-
         public RelayCommand OpenDataDirectoryCommand { get; }
 
         private async Task SaveAsync()
@@ -286,6 +225,7 @@ namespace AIGeekTuner.ViewModels
             try
             {
                 // 先写盘（服务内部再次权威校验），成功后才换入运行时快照。
+                // V2-M5.1B（Gate N）：旧 Ollama 字段不再来自 UI——保存时原样带回旧值，保持升级兼容。
                 await _settingsService.SaveAsync(settings);
                 _configurationStore.Replace(new DiagnosticConfiguration(
                     new OllamaOptions
@@ -314,75 +254,6 @@ namespace AIGeekTuner.ViewModels
             finally
             {
                 IsSaving = false;
-            }
-        }
-
-        private async Task RefreshModelsAsync()
-        {
-            IsLoadingModels = true;
-            try
-            {
-                var models = await _connectionService.GetModelsAsync(BaseUrl);
-
-                // 刷新只更新候选列表；用户手动输入的名称绝不能被清掉。
-                AvailableModels.Clear();
-                foreach (var model in models)
-                {
-                    AvailableModels.Add(model);
-                }
-
-                SetStatus(SettingsStatusKind.Success, $"已从 Ollama 获取 {models.Count} 个已安装模型。");
-            }
-            catch (OllamaConnectionException exception)
-            {
-                SetStatus(SettingsStatusKind.Warning, exception.Message);
-            }
-            catch (Exception exception)
-            {
-                ExceptionLogWriter.Write(exception, "SettingsViewModel.RefreshModelsAsync");
-                SetStatus(SettingsStatusKind.Error, "获取模型列表失败，请稍后重试。");
-            }
-            finally
-            {
-                IsLoadingModels = false;
-            }
-        }
-
-        private async Task TestConnectionAsync()
-        {
-            IsTestingConnection = true;
-            try
-            {
-                var modelName = ModelName.Trim();
-                if (string.IsNullOrEmpty(modelName))
-                {
-                    SetStatus(SettingsStatusKind.Warning, "请先填写要使用的模型名称。");
-                    return;
-                }
-
-                var readiness = await _connectionService.CheckReadinessAsync(BaseUrl, modelName);
-                SetStatus(ToStatusKind(readiness.Status), readiness.Message);
-
-                if (readiness.Models.Count > 0 && AvailableModels.Count == 0)
-                {
-                    foreach (var model in readiness.Models)
-                    {
-                        AvailableModels.Add(model);
-                    }
-                }
-            }
-            catch (OllamaConnectionException exception)
-            {
-                SetStatus(SettingsStatusKind.Error, exception.Message);
-            }
-            catch (Exception exception)
-            {
-                ExceptionLogWriter.Write(exception, "SettingsViewModel.TestConnectionAsync");
-                SetStatus(SettingsStatusKind.Error, "连接检测失败，请稍后重试。");
-            }
-            finally
-            {
-                IsTestingConnection = false;
             }
         }
 
@@ -429,11 +300,13 @@ namespace AIGeekTuner.ViewModels
             settings = new ApplicationSettings
             {
                 AutoSaveDiagnosisHistory = AutoSaveDiagnosisHistory,
-                OllamaBaseUrl = BaseUrl.Trim(),
-                OllamaModelName = ModelName.Trim(),
+
+                // V2-M5.1B（Gate N）：旧 Ollama 字段原样保留（数据兼容）；runtime 不再从这些字段选择模型。
+                OllamaBaseUrl = previous.OllamaBaseUrl,
+                OllamaModelName = previous.OllamaModelName,
                 OllamaTimeoutSeconds = int.Parse(TimeoutSecondsText),
                 MaxFaultLogCharacters = int.Parse(MaxLogLengthText, System.Globalization.NumberStyles.AllowThousands),
-                UseJsonFormat = UseJsonFormat,
+                UseJsonFormat = previous.UseJsonFormat,
                 RecordingIntervalMs = RecordingIntervalMs,
                 Voice = new VoiceSettings
                 {
@@ -501,13 +374,5 @@ namespace AIGeekTuner.ViewModels
             StatusKind = kind;
             StatusMessage = message;
         }
-
-        private static SettingsStatusKind ToStatusKind(OllamaReadinessStatus status) =>
-            status switch
-            {
-                OllamaReadinessStatus.Ready => SettingsStatusKind.Success,
-                OllamaReadinessStatus.ModelMissing => SettingsStatusKind.Warning,
-                _ => SettingsStatusKind.Error
-            };
     }
 }

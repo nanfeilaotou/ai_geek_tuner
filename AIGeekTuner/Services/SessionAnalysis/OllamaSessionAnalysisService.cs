@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AIGeekTuner.Models.Sessions;
+using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.Telemetry.Recording;
 
 namespace AIGeekTuner.Services.SessionAnalysis
@@ -57,16 +58,24 @@ namespace AIGeekTuner.Services.SessionAnalysis
         private readonly int _maxContextCharacters;
         private readonly Func<string>? _modelNameProvider;
 
+        /// <summary>
+        /// V2-M5.1B（Gate D/K）：每次分析开始时调用一次，捕获当次分析的不可变运行时快照；
+        /// 返回 null 表示当前没有可用的 AI 服务提供方（不重试、不 repair）。null 工厂 = legacy 路径。
+        /// </summary>
+        private readonly Func<Task<AiRuntimeSnapshot?>>? _runtimeProvider;
+
         public OllamaSessionAnalysisService(
             IOllamaChatClient client,
             ISessionAnalysisPromptBuilder promptBuilder,
             int? maxContextCharacters = null,
-            Func<string>? modelNameProvider = null)
+            Func<string>? modelNameProvider = null,
+            Func<Task<AiRuntimeSnapshot?>>? runtimeProvider = null)
         {
             _client = client ?? throw new ArgumentNullException(nameof(client));
             _promptBuilder = promptBuilder ?? throw new ArgumentNullException(nameof(promptBuilder));
             _maxContextCharacters = maxContextCharacters ?? DefaultMaxContextCharacters;
             _modelNameProvider = modelNameProvider;
+            _runtimeProvider = runtimeProvider;
         }
 
         /// <summary>V2-M4.3 主入口：组合证据上下文（telemetry + 可选 incidents）→ AI。</summary>
@@ -101,7 +110,22 @@ namespace AIGeekTuner.Services.SessionAnalysis
             var system = _promptBuilder.BuildSystemPrompt();
             var user = _promptBuilder.BuildUserPrompt(combined);
 
-            return await AnalyzeCoreAsync(system, user, validEvidenceIds, contextJson, stopwatch, cancellationToken)
+            // Gate D：一次分析只捕获一次运行时快照（第一次请求与 repair 共用）。
+            AiRuntimeSnapshot? runtime = null;
+            if (_runtimeProvider is not null)
+            {
+                runtime = await _runtimeProvider().ConfigureAwait(false);
+                if (runtime is null)
+                {
+                    return new SessionAnalysisRun(
+                        false, null,
+                        "尚未配置可用的 AI 服务提供方，请前往设置。",
+                        [], 0, stopwatch.Elapsed, "(unavailable)", false,
+                        contextJson);
+                }
+            }
+
+            return await AnalyzeCoreAsync(system, user, validEvidenceIds, contextJson, stopwatch, runtime, cancellationToken)
                 .ConfigureAwait(false);
         }
 
@@ -140,11 +164,12 @@ namespace AIGeekTuner.Services.SessionAnalysis
             IReadOnlyList<string> validEvidenceIds,
             string evidenceContextJson,
             Stopwatch stopwatch,
+            AiRuntimeSnapshot? runtime,
             CancellationToken cancellationToken)
         {
             try
             {
-                var first = await _client.ChatAsync(system, user, ResultSchema, think: false, cancellationToken)
+                var first = await _client.ChatAsync(runtime, system, user, ResultSchema, think: false, cancellationToken)
                     .ConfigureAwait(false);
                 try
                 {
@@ -154,7 +179,8 @@ namespace AIGeekTuner.Services.SessionAnalysis
                 catch (SessionAnalysisParseException parseFailure)
                 {
                     var repairUser = user + " " + _promptBuilder.BuildRepairPrompt(parseFailure.Errors);
-                    var second = await _client.ChatAsync(system, repairUser, ResultSchema, think: false, cancellationToken)
+                    // Gate I：repair 与第一次请求使用同一份运行时快照。
+                    var second = await _client.ChatAsync(runtime, system, repairUser, ResultSchema, think: false, cancellationToken)
                         .ConfigureAwait(false);
                     try
                     {
@@ -176,14 +202,18 @@ namespace AIGeekTuner.Services.SessionAnalysis
             {
                 // HTTP / 超时等传输层失败不做 repair（§23）。
                 return new SessionAnalysisRun(false, null, exception.Message, [], 1,
-                    stopwatch.Elapsed, "(unavailable)", false, evidenceContextJson);
+                    stopwatch.Elapsed, "(unavailable)", false, evidenceContextJson,
+                    runtime?.ProviderId, runtime?.ProviderDisplayName);
             }
 
             SessionAnalysisRun Done(bool ok, SessionAnalysisResult? result, string? error,
                 IReadOnlyList<string> validationErrors, int requests, bool repairUsed)
                 => new(ok, result, error, validationErrors, requests,
-                    stopwatch.Elapsed, (_modelNameProvider?.Invoke() ?? "(unavailable)"), repairUsed,
-                    evidenceContextJson);
+                    stopwatch.Elapsed,
+                    (runtime?.ModelId ?? _modelNameProvider?.Invoke() ?? "(unavailable)"),
+                    repairUsed,
+                    evidenceContextJson,
+                    runtime?.ProviderId, runtime?.ProviderDisplayName);
         }
 
         internal static TelemetrySessionAnalyzer.TelemetryAnalysisContext TrimContextIfNeeded(

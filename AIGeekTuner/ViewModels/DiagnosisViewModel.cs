@@ -183,7 +183,7 @@ namespace AIGeekTuner.ViewModels
                 HardwareStepStatus = "已完成";
                 AiStepStatus = "分析中";
                 SafetyStepStatus = "等待 AI 结果";
-                StatusMessage = "正在调用本地 Ollama；返回后将自动执行 SafetyGuard...";
+                StatusMessage = "正在调用当前 AI 服务；返回后将自动执行 SafetyGuard...";
 
                 // 本次诊断的唯一配置快照：readiness、prompt、模型请求共用。
                 var configuration = _configurationStore.Snapshot();
@@ -222,7 +222,9 @@ namespace AIGeekTuner.ViewModels
                         exception.Message,
                         configuration,
                         diagnosisStopwatch.ElapsedMilliseconds,
-                        cancellationToken);
+                        cancellationToken,
+                        exception.ModelName,
+                        exception.ProviderName);
                     throw;
                 }
 
@@ -233,11 +235,13 @@ namespace AIGeekTuner.ViewModels
                 if (_applicationSettingsService.Current.AutoSaveDiagnosisHistory)
                 {
                     StatusMessage = "诊断完成，正在保存本地报告...";
+                    // V2-M5.1B（Gate L）：记录实际产生结果的模型与 Provider（来自运行时快照）。
                     await _diagnosisHistoryService.SaveSuccessAsync(
                         outcome,
-                        configuration.Ollama.ModelName,
+                        outcome.ModelName ?? configuration.Ollama.ModelName,
                         diagnosisStopwatch.ElapsedMilliseconds,
-                        cancellationToken);
+                        cancellationToken,
+                        outcome.ProviderDisplayName);
                     StatusMessage = "诊断、安全检查与本地报告保存已完成";
                 }
                 else
@@ -263,7 +267,9 @@ namespace AIGeekTuner.ViewModels
             string failureReason,
             DiagnosticConfiguration configuration,
             long elapsedMs,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? modelName = null,
+            string? providerName = null)
         {
             // AutoSave 关闭时成功与失败都不落库，保持语义一致。
             if (!_applicationSettingsService.Current.AutoSaveDiagnosisHistory)
@@ -276,11 +282,12 @@ namespace AIGeekTuner.ViewModels
                 await _diagnosisHistoryService.SaveFailureAsync(
                     new DiagnosisFailureInfo(
                         DateTimeOffset.Now,
-                        configuration.Ollama.ModelName,
+                        modelName ?? "未知",
                         elapsedMs,
                         failureCode,
                         failureReason,
-                        _selectedFaultLog?.FileName),
+                        _selectedFaultLog?.FileName,
+                        providerName),
                     cancellationToken);
             }
             catch (Exception saveFailure)

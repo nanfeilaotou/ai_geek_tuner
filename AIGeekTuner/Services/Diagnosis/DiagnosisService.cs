@@ -1,27 +1,35 @@
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
 using AIGeekTuner.Services.AI;
+using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.Safety;
 
 namespace AIGeekTuner.Services.Diagnosis
 {
+    /// <summary>
+    /// AI 智能诊断编排（V2-M5.1B 起 provider-aware）。
+    /// 只替换了“发送层”：Prompt 构建、结果解析、唯一一次 repair、SafetyGuard、
+    /// 失败分类（<see cref="DiagnosisFailurePolicy"/>）全部保持原语义。
+    /// Gate D：一次诊断全程只使用开始时捕获的一份不可变 <see cref="AiRuntimeSnapshot"/>；
+    /// Gate I：repair 与第一次请求使用同一份快照；HTTP/超时/取消/认证/模型拒绝不做 repair。
+    /// </summary>
     public sealed class DiagnosisService : IDiagnosisService
     {
-        private readonly IAiService _aiService;
-        private readonly IAiReadinessService _readinessService;
+        private readonly IAiChatRuntime _aiRuntime;
         private readonly DiagnosisPromptBuilder _promptBuilder;
         private readonly ISafetyService _safetyService;
+        private readonly DiagnosticResultParser _resultParser;
 
         public DiagnosisService(
-            IAiService aiService,
-            IAiReadinessService readinessService,
+            IAiChatRuntime aiRuntime,
             DiagnosisPromptBuilder promptBuilder,
-            ISafetyService safetyService)
+            ISafetyService safetyService,
+            DiagnosticResultParser? resultParser = null)
         {
-            _aiService = aiService ?? throw new ArgumentNullException(nameof(aiService));
-            _readinessService = readinessService ?? throw new ArgumentNullException(nameof(readinessService));
+            _aiRuntime = aiRuntime ?? throw new ArgumentNullException(nameof(aiRuntime));
             _promptBuilder = promptBuilder ?? throw new ArgumentNullException(nameof(promptBuilder));
             _safetyService = safetyService ?? throw new ArgumentNullException(nameof(safetyService));
+            _resultParser = resultParser ?? new DiagnosticResultParser();
         }
 
         public async Task<DiagnosisOutcome> DiagnoseAsync(
@@ -33,9 +41,14 @@ namespace AIGeekTuner.Services.Diagnosis
             ValidateRequest(request);
             cancellationToken.ThrowIfCancellationRequested();
 
-            // 本次诊断全程只使用调用方传入的这一份配置快照：
-            // readiness、prompt 截断上限、模型请求全部取自 configuration。
-            await EnsureReadyAsync(configuration.Ollama, cancellationToken);
+            // Gate D/O：快照超时取自本次配置快照（全局请求超时），快照之后设置变化不影响本次。
+            var runtime = await CaptureRuntimeAsync(
+                configuration.Ollama.TimeoutSeconds,
+                cancellationToken);
+
+            // Gate J：只有 Ollama Native 保留廉价 /api/tags 就绪检查；
+            // OpenAI 兼容 Provider 不做 /models 预检，直接发送真实请求。
+            await EnsureReadyAsync(runtime, cancellationToken);
 
             string systemPrompt;
             string userContext;
@@ -54,13 +67,18 @@ namespace AIGeekTuner.Services.Diagnosis
                     exception);
             }
 
+            var messages = new[]
+            {
+                new AiChatMessage("system", systemPrompt),
+                new AiChatMessage("user", userContext)
+            };
+
             DiagnosticResult aiResult;
             try
             {
-                aiResult = await _aiService.GetDiagnosticResultAsync(
-                    systemPrompt,
-                    userContext,
-                    configuration.Ollama,
+                aiResult = await RunChatWithSingleRepairAsync(
+                    runtime,
+                    messages,
                     cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -71,36 +89,19 @@ namespace AIGeekTuner.Services.Diagnosis
             {
                 throw new DiagnosisException(
                     DiagnosisError.AiResponseInvalid,
-                    "本地 AI 返回的诊断结果无法解析。",
+                    "AI 返回的诊断结果无法解析。",
                     exception);
             }
-            catch (OllamaServiceException exception)
+            catch (AiRuntimeException exception)
             {
-                throw new DiagnosisException(
-                    DiagnosisError.AiRequestFailed,
-                    "调用本地 Ollama 诊断服务失败。",
-                    exception);
-            }
-            catch (TimeoutException exception)
-            {
-                throw new DiagnosisException(
-                    DiagnosisError.AiRequestFailed,
-                    "本地 AI 诊断请求超时。",
-                    exception);
-            }
-            catch (Exception exception)
-            {
-                throw new DiagnosisException(
-                    DiagnosisError.AiRequestFailed,
-                    "执行本地 AI 诊断时发生错误。",
-                    exception);
+                throw MapAiRuntimeException(exception, runtime);
             }
 
             if (aiResult is null)
             {
                 throw new DiagnosisException(
                     DiagnosisError.AiResponseInvalid,
-                    "本地 AI 没有返回诊断结果。");
+                    "AI 没有返回诊断结果。");
             }
 
             SafetyResult safetyResult;
@@ -118,7 +119,7 @@ namespace AIGeekTuner.Services.Diagnosis
             {
                 throw new DiagnosisException(
                     DiagnosisError.SafetyCheckFailed,
-                    "本地 SafetyGuard 检查失败。",
+                    "SafetyGuard 检查失败。",
                     exception);
             }
 
@@ -134,50 +135,135 @@ namespace AIGeekTuner.Services.Diagnosis
                 Request = request,
                 AiResult = aiResult,
                 Safety = safetyResult,
-                CompletedAt = DateTimeOffset.UtcNow
+                CompletedAt = DateTimeOffset.UtcNow,
+                ModelName = runtime.ModelId,
+                ProviderId = runtime.ProviderId,
+                ProviderDisplayName = runtime.ProviderDisplayName
             };
         }
 
-        private async Task EnsureReadyAsync(
-            OllamaOptions options,
+        private async Task<AiRuntimeSnapshot> CaptureRuntimeAsync(
+            int timeoutSeconds,
             CancellationToken cancellationToken)
         {
             try
             {
-                var readiness = await _readinessService.CheckReadinessAsync(
-                    options,
+                return await _aiRuntime.CaptureSnapshotAsync(
+                    timeoutSeconds,
                     cancellationToken);
-
-                switch (readiness.Status)
-                {
-                    case AiReadinessStatus.Ready:
-                        return;
-                    case AiReadinessStatus.ModelMissing:
-                        throw new DiagnosisException(
-                            DiagnosisError.OllamaUnavailable,
-                            readiness.Message);
-                    default:
-                        throw new DiagnosisException(
-                            DiagnosisError.OllamaUnavailable,
-                            readiness.Message);
-                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            catch (DiagnosisException)
-            {
-                throw;
-            }
-            catch (Exception exception)
+            catch (AiRuntimeException exception) when (exception.Error == AiRuntimeError.NotConfigured)
             {
                 throw new DiagnosisException(
-                    DiagnosisError.OllamaUnavailable,
-                    "无法检查本地 Ollama 服务状态。",
+                    DiagnosisError.AiUnavailable,
+                    exception.UserMessage,
                     exception);
             }
         }
+
+        private async Task EnsureReadyAsync(
+            AiRuntimeSnapshot runtime,
+            CancellationToken cancellationToken)
+        {
+            AiReadinessResult readiness;
+            try
+            {
+                readiness = await _aiRuntime.CheckReadinessAsync(
+                    runtime,
+                    cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (AiRuntimeException exception)
+            {
+                throw new DiagnosisException(
+                    DiagnosisError.AiUnavailable,
+                    exception.UserMessage,
+                    exception);
+            }
+
+            if (readiness.Status != AiReadinessStatus.Ready)
+            {
+                throw new DiagnosisException(
+                    DiagnosisError.AiUnavailable,
+                    readiness.Message);
+            }
+        }
+
+        /// <summary>
+        /// 一次 chat + 解析失败后的唯一一次 repair（Gate I）。
+        /// 两次请求使用同一份 <paramref name="runtime"/> 快照；传输层异常直接向上传播，不做 repair。
+        /// </summary>
+        private async Task<DiagnosticResult> RunChatWithSingleRepairAsync(
+            AiRuntimeSnapshot runtime,
+            IReadOnlyList<AiChatMessage> messages,
+            CancellationToken cancellationToken)
+        {
+            // Gate H：Diagnosis 现契约 = JSON mode + parser 校验（无完整 schema），
+            // 等价映射为 JsonObject 意图；协议层具体行为由 transport 按 Profile 模式决定。
+            // 采样选项与旧 OllamaService 完全一致：think:false、temperature 0.2。
+            var structuredOutput = AiStructuredOutputRequest.JsonObject;
+            var chatOptions = new AiChatRuntimeOptions(Think: false, Temperature: 0.2);
+
+            var firstResponse = await _aiRuntime.SendChatAsync(
+                runtime,
+                messages,
+                structuredOutput,
+                chatOptions,
+                cancellationToken);
+
+            try
+            {
+                return _resultParser.Parse(firstResponse);
+            }
+            catch (DiagnosticResultParsingException firstError)
+            {
+                // 只有“模型成功返回文本但结构无效”才做唯一一次修复重试；
+                // HTTP 错误、超时、取消等异常不会进入本分支，直接向上传播。
+                var repairMessages = new List<AiChatMessage>(messages)
+                {
+                    new("assistant", firstResponse),
+                    new("user", DiagnosisRepairInstruction.Build(firstError))
+                };
+                var repairResponse = await _aiRuntime.SendChatAsync(
+                    runtime,
+                    repairMessages,
+                    structuredOutput,
+                    chatOptions,
+                    cancellationToken);
+
+                try
+                {
+                    return _resultParser.Parse(repairResponse);
+                }
+                catch (DiagnosticResultParsingException secondError)
+                {
+                    throw new DiagnosticResultParsingException(
+                        "模型两次输出均无法解析为诊断结果。首次错误：" + firstError.Message
+                        + "；修复后错误：" + secondError.Message,
+                        secondError);
+                }
+            }
+        }
+
+        /// <summary>运行时错误 → 诊断异常：用户文案来自脱敏的 <see cref="AiRuntimeException.UserMessage"/>。</summary>
+        private static DiagnosisException MapAiRuntimeException(
+            AiRuntimeException exception,
+            AiRuntimeSnapshot runtime) =>
+            new(
+                DiagnosisError.AiRequestFailed,
+                exception.UserMessage,
+                exception)
+            {
+                ModelName = runtime.ModelId,
+                ProviderName = runtime.ProviderDisplayName
+            };
 
         private static void ValidateRequest(DiagnosticRequest? request)
         {

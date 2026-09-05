@@ -62,7 +62,8 @@ namespace AIGeekTuner.Services.History
             DiagnosisOutcome outcome,
             string modelName,
             long durationMs,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            string? providerName = null)
         {
             ArgumentNullException.ThrowIfNull(outcome);
 
@@ -72,7 +73,7 @@ namespace AIGeekTuner.Services.History
                 Directory.CreateDirectory(_reportsDirectory);
 
                 var outcomePath = DetailPathFor(outcome.DiagnosisId);
-                var record = CreateSuccessRecord(outcome, modelName, durationMs, outcomePath);
+                var record = CreateSuccessRecord(outcome, modelName, durationMs, outcomePath, providerName);
 
                 var detail = new DiagnosisHistoryDetail
                 {
@@ -80,6 +81,7 @@ namespace AIGeekTuner.Services.History
                     Succeeded = true,
                     Outcome = outcome,
                     ModelName = modelName,
+                    ProviderName = providerName,
                     DurationMs = durationMs
                 };
                 await WriteJsonAtomicallyAsync(outcomePath, detail, cancellationToken);
@@ -125,6 +127,7 @@ namespace AIGeekTuner.Services.History
                     FailureReason = reason,
                     FailureCode = failure.FailureCode,
                     ModelName = failure.ModelName,
+                    ProviderName = failure.ProviderName,
                     DurationMs = failure.DurationMs,
                     CompletedAt = failure.CompletedAt.ToUniversalTime()
                 };
@@ -144,6 +147,7 @@ namespace AIGeekTuner.Services.History
                     DiagnosisOutcomePath = detailPath,
                     Succeeded = false,
                     ModelName = failure.ModelName,
+                    ProviderName = failure.ProviderName,
                     DurationMs = failure.DurationMs,
                     FailureReason = reason
                 };
@@ -445,6 +449,7 @@ namespace AIGeekTuner.Services.History
                     DiagnosisOutcomePath = path,
                     Succeeded = true,
                     ModelName = detail.ModelName,
+                    ProviderName = detail.ProviderName,
                     DurationMs = detail.DurationMs
                 };
             }
@@ -461,6 +466,7 @@ namespace AIGeekTuner.Services.History
                 DiagnosisOutcomePath = path,
                 Succeeded = false,
                 ModelName = detail.ModelName,
+                ProviderName = detail.ProviderName,
                 DurationMs = detail.DurationMs,
                 FailureReason = detail.FailureReason
             };
@@ -498,7 +504,8 @@ namespace AIGeekTuner.Services.History
             DiagnosisOutcome outcome,
             string modelName,
             long durationMs,
-            string outcomePath) => new()
+            string outcomePath,
+            string? providerName = null) => new()
         {
             DiagnosisId = outcome.DiagnosisId,
             CreatedAt = outcome.CompletedAt.ToUniversalTime(),
@@ -512,6 +519,7 @@ namespace AIGeekTuner.Services.History
             DiagnosisOutcomePath = outcomePath,
             Succeeded = true,
             ModelName = modelName,
+            ProviderName = providerName,
             DurationMs = durationMs
         };
 

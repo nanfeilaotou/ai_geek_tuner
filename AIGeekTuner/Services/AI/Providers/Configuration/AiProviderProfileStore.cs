@@ -160,7 +160,8 @@ namespace AIGeekTuner.Services.AI.Providers.Configuration
             return new AiProviderConfiguration
             {
                 Version = configuration.Version,
-                Profiles = validProfiles
+                Profiles = validProfiles,
+                ActiveProviderId = configuration.ActiveProviderId
             };
         }
 

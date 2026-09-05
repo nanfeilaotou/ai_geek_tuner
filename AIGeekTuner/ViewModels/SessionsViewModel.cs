@@ -1004,7 +1004,8 @@ namespace AIGeekTuner.ViewModels
 
                 // Gate D ①：持久化永远属于目标会话（analysis.json for A），与界面无关。
                 var saved = PersistAnalysis(targetSessionId, run.Result, run.ModelName,
-                    sw.ElapsedMilliseconds, contextJson, run.RepairUsed);
+                    sw.ElapsedMilliseconds, contextJson, run.RepairUsed,
+                    run.ProviderId, run.ProviderName);
 
                 // Gate D ②：刷新历史元数据（“已分析”标记），无论当前 Detail 是谁。
                 LoadRecent();
@@ -1110,7 +1111,9 @@ namespace AIGeekTuner.ViewModels
             string modelName,
             long durationMs,
             string contextJson,
-            bool repairUsed)
+            bool repairUsed,
+            string? providerId = null,
+            string? providerName = null)
         {
             try
             {
@@ -1122,7 +1125,9 @@ namespace AIGeekTuner.ViewModels
                     DurationMs: durationMs,
                     RepairUsed: repairUsed,
                     Result: result,
-                    ContextJson: contextJson));
+                    ContextJson: contextJson,
+                    ProviderId: providerId,
+                    ProviderName: providerName));
                 return true;
             }
             catch (Exception exception)
