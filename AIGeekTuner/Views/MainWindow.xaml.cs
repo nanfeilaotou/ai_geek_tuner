@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AIGeekTuner.Views.Behaviors;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
@@ -256,6 +257,35 @@ namespace AIGeekTuner
         private void CloseButton_Click(object sender, RoutedEventArgs e) =>
             WindowChromeController.Close(this);
 
+        private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.Handled
+                || e.ChangedButton != MouseButton.Left
+                || Mouse.LeftButton != MouseButtonState.Pressed
+                || !WindowDragHitTest.IsDraggableFrom(e.OriginalSource as DependencyObject, this))
+            {
+                return;
+            }
+
+            if (e.ClickCount == 2)
+            {
+                WindowChromeController.ToggleMaximize(this);
+                e.Handled = true;
+                return;
+            }
+
+            try
+            {
+                DragMove();
+                e.Handled = true;
+            }
+            catch (InvalidOperationException)
+            {
+                // A synthetic/unit-test event may not have an active HWND.
+                // A real WPF window receives the native drag operation here.
+            }
+        }
+
         private void Window_StateChanged(object? sender, EventArgs e) =>
             UpdateCaptionGlyphs();
 
@@ -370,5 +400,4 @@ namespace AIGeekTuner
         }
     }
 }
-
 

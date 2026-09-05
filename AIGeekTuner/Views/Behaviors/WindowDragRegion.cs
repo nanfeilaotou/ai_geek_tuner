@@ -42,9 +42,13 @@ namespace AIGeekTuner.Views.Behaviors
 
         private static void OnPreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs args)
         {
+            var dragRegion = sender as DependencyObject;
             if (args.Handled
                 || args.ChangedButton != MouseButton.Left
-                || WindowDragHitTest.IsInteractive(args.OriginalSource as DependencyObject))
+                || dragRegion is null
+                || !WindowDragHitTest.IsDraggableFrom(
+                    args.OriginalSource as DependencyObject,
+                    dragRegion))
             {
                 return;
             }

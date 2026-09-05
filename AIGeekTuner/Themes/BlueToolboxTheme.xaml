@@ -184,6 +184,9 @@
     <Style x:Key="WindowCaptionButtonStyle" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{StaticResource PrimaryTextBrush}"/>
+        <Setter Property="Width" Value="46"/>
+        <Setter Property="Height" Value="40"/>
+        <Setter Property="Margin" Value="0"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="0"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -200,22 +203,26 @@
                         <Trigger Property="IsMouseOver" Value="True">
                             <Setter TargetName="Root" Property="Background" Value="#28FFFFFF"/>
                         </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="Close"/>
+                                <Condition Property="IsMouseOver" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Root" Property="Background" Value="#B84D3F55"/>
+                        </MultiTrigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="Root" Property="Background" Value="#3DFFFFFF"/>
                         </Trigger>
+                        <MultiTrigger>
+                            <MultiTrigger.Conditions>
+                                <Condition Property="Tag" Value="Close"/>
+                                <Condition Property="IsPressed" Value="True"/>
+                            </MultiTrigger.Conditions>
+                            <Setter TargetName="Root" Property="Background" Value="#D95E4050"/>
+                        </MultiTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
-    </Style>
-
-    <Style x:Key="WindowCaptionCloseButtonStyle"
-           TargetType="Button"
-           BasedOn="{StaticResource WindowCaptionButtonStyle}">
-        <Style.Triggers>
-            <Trigger Property="IsMouseOver" Value="True">
-                <Setter Property="Background" Value="#B83D5C67"/>
-            </Trigger>
-        </Style.Triggers>
     </Style>
 </ResourceDictionary>

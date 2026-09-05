@@ -2,7 +2,6 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        xmlns:behavior="clr-namespace:AIGeekTuner.Views.Behaviors"
         Title="{Binding Title}" Height="760" Width="1180"
         MinHeight="680" MinWidth="1024"
         WindowStartupLocation="CenterScreen"
@@ -11,7 +10,8 @@
         Background="{DynamicResource AppBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True"
-        StateChanged="Window_StateChanged">
+        StateChanged="Window_StateChanged"
+        PreviewMouseLeftButtonDown="Window_PreviewMouseLeftButtonDown">
     <shell:WindowChrome.WindowChrome>
         <shell:WindowChrome CaptionHeight="40"
                             ResizeBorderThickness="6"
@@ -26,7 +26,6 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Background="{DynamicResource ShellBackgroundBrush}"
-                behavior:WindowDragRegion.IsDragRegion="True"
                 BorderBrush="#3378BB" BorderThickness="0,0,1,0">
             <Grid>
                 <Grid.RowDefinitions>
@@ -90,7 +89,6 @@
                     BorderBrush="#24FFFFFF"
                     BorderThickness="0,0,0,1"
                     Padding="16,0,0,0"
-                    behavior:WindowDragRegion.IsDragRegion="True"
                     shell:WindowChrome.IsHitTestVisibleInChrome="True">
                 <Grid>
                     <TextBlock Text="{Binding CurrentPageDisplayName}"
@@ -104,19 +102,19 @@
                                 Orientation="Horizontal"
                                 VerticalAlignment="Stretch">
                         <Button x:Name="MinimizeButton"
-                                Width="46"
                                 AutomationProperties.Name="最小化"
                                 Click="MinimizeButton_Click"
                                 Style="{StaticResource WindowCaptionButtonStyle}"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                            <Path Data="M 2,7 L 12,7"
-                                  Stroke="{DynamicResource PrimaryTextBrush}"
-                                  StrokeThickness="1.2"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"/>
+                            <Grid Width="14" Height="14">
+                                <Path Data="M 2,8 L 12,8"
+                                      Stroke="{DynamicResource PrimaryTextBrush}"
+                                      StrokeThickness="1.2"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            </Grid>
                         </Button>
                         <Button x:Name="MaximizeButton"
-                                Width="46"
                                 AutomationProperties.Name="最大化 / 还原"
                                 Click="MaximizeButton_Click"
                                 Style="{StaticResource WindowCaptionButtonStyle}"
@@ -128,24 +126,26 @@
                                       StrokeThickness="1.1"
                                       Fill="Transparent"/>
                                 <Path x:Name="RestoreGlyph"
-                                      Data="M 5,3 H 13 V 11 H 5 Z M 3,5 H 11 V 13 H 3 Z"
+                                      Data="M 4,2 H 12 V 10 H 4 Z M 2,4 H 10 V 12 H 2 Z"
                                       Stroke="{DynamicResource PrimaryTextBrush}"
                                       StrokeThickness="1.1"
-                                      Fill="{DynamicResource PanelBackgroundBrush}"
+                                      Fill="Transparent"
                                       Visibility="Collapsed"/>
                             </Grid>
                         </Button>
                         <Button x:Name="CloseButton"
-                                Width="46"
                                 AutomationProperties.Name="关闭"
+                                Tag="Close"
                                 Click="CloseButton_Click"
-                                Style="{StaticResource WindowCaptionCloseButtonStyle}"
+                                Style="{StaticResource WindowCaptionButtonStyle}"
                                 shell:WindowChrome.IsHitTestVisibleInChrome="True">
-                            <Path Data="M 3,3 L 11,11 M 11,3 L 3,11"
-                                  Stroke="{DynamicResource PrimaryTextBrush}"
-                                  StrokeThickness="1.2"
-                                  HorizontalAlignment="Center"
-                                  VerticalAlignment="Center"/>
+                            <Grid Width="14" Height="14">
+                                <Path Data="M 2.5,2.5 L 11.5,11.5 M 11.5,2.5 L 2.5,11.5"
+                                      Stroke="{DynamicResource PrimaryTextBrush}"
+                                      StrokeThickness="1.2"
+                                      HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"/>
+                            </Grid>
                         </Button>
                     </StackPanel>
                 </Grid>
