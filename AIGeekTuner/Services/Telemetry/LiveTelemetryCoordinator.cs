@@ -45,6 +45,7 @@ namespace AIGeekTuner.Services.Telemetry
 
         private CancellationTokenSource? _cts;
         private Task? _loop;
+        private int _firstSnapshotLogged;
 
         public LiveTelemetryCoordinator(ITelemetryHub hub, ITelemetryRecordingService? recorder = null)
         {
@@ -165,6 +166,10 @@ namespace AIGeekTuner.Services.Telemetry
         private void Publish(TelemetrySnapshot snapshot)
         {
             LatestSnapshot = snapshot;
+            if (Interlocked.Exchange(ref _firstSnapshotLogged, 1) == 0)
+            {
+                StartupBreadcrumbLogger.Write("FIRST_TELEMETRY_READY");
+            }
             SnapshotUpdated?.Invoke(snapshot);
         }
 

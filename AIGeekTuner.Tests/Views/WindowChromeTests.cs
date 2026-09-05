@@ -245,6 +245,61 @@ public sealed class WindowChromeTests
     }
 
     [Fact]
+    public void NativeHitTestRouter_UsesSubclassHelpersWithoutReplacingWndProc()
+    {
+        var router = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs")));
+
+        Assert.Contains("SetWindowSubclass", router);
+        Assert.Contains("RemoveWindowSubclass", router);
+        Assert.Contains("DefSubclassProc", router);
+        Assert.DoesNotContain("SetWindowLongPtr", router);
+        Assert.DoesNotContain("CallWindowProc", router);
+        Assert.Contains("WmNcDestroy", router);
+    }
+
+    [Fact]
+    public void WindowMoveState_IsInheritableToSidebarControls()
+    {
+        Exception? failure = null;
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                var window = new Window();
+                var button = new Button();
+                window.Content = button;
+                WindowMoveState.SetIsMoving(window, true);
+
+                Assert.True(WindowMoveState.GetIsMoving(button));
+                WindowMoveState.SetIsMoving(window, false);
+                Assert.False(WindowMoveState.GetIsMoving(button));
+            }
+            catch (Exception exception)
+            {
+                failure = exception;
+            }
+        });
+
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(60)), "WindowMoveState test 超时");
+        Assert.Null(failure);
+    }
+
+    [Fact]
+    public void NavigationHover_IsSuppressedOnlyWhileWindowMoves()
+    {
+        var theme = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Themes", "BlueToolboxTheme.xaml")));
+
+        Assert.Contains("WindowMoveState.IsMoving", theme);
+        Assert.Contains("Path=IsMouseOver", theme);
+        Assert.Contains("Value=\"False\"", theme);
+        Assert.Contains("NavigationSelectedableStyle", theme);
+    }
+
+    [Fact]
     public void MainWindow_UsesNativeHitTestAndNoWpfDragWorkaround()
     {
         var xaml = File.ReadAllText(FindRepositoryFile(

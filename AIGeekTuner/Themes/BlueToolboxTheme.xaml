@@ -1,5 +1,6 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:behaviors="clr-namespace:AIGeekTuner.Views.Behaviors">
     <LinearGradientBrush x:Key="AppBackgroundBrush" StartPoint="0,0" EndPoint="1,0">
         <GradientStop Color="#1B83C3" Offset="0"/>
         <GradientStop Color="#159DD0" Offset="0.55"/>
@@ -104,10 +105,14 @@
                                           VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <Trigger Property="IsMouseOver" Value="True">
+                        <MultiDataTrigger>
+                            <MultiDataTrigger.Conditions>
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsMouseOver}" Value="True"/>
+                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=(behaviors:WindowMoveState.IsMoving)}" Value="False"/>
+                            </MultiDataTrigger.Conditions>
                             <Setter TargetName="Root" Property="Background" Value="{StaticResource NavigationHoverBrush}"/>
                             <Setter Property="Foreground" Value="White"/>
-                        </Trigger>
+                        </MultiDataTrigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>

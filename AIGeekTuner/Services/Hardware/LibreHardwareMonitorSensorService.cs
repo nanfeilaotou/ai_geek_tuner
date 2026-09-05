@@ -1,4 +1,6 @@
 using AIGeekTuner.Models;
+using AIGeekTuner.Services.Diagnostics;
+using AIGeekTuner.Services.Telemetry.LibreHardwareMonitor;
 using LibreHardwareMonitor.Hardware;
 
 namespace AIGeekTuner.Services.Hardware
@@ -36,40 +38,40 @@ namespace AIGeekTuner.Services.Hardware
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var computer = new Computer
+            var computers = new[]
             {
-                IsCpuEnabled = true,
-                IsGpuEnabled = true,
-                IsMemoryEnabled = true,
-                IsStorageEnabled = true
+                LibreHardwareMonitorComputerFactory.CreateCoreComputer(),
+                LibreHardwareMonitorComputerFactory.CreateGpuComputer()
             };
-
-            try
+            var readings = new List<SensorReading>();
+            foreach (var computer in computers)
             {
-                computer.Open();
-                var readings = new List<SensorReading>();
-                foreach (var hardware in computer.Hardware)
-                {
-                    CollectReadings(
-                        hardware,
-                        readings,
-                        cancellationToken);
-                }
+                    try
+                    {
+                        var scope = computer.IsGpuEnabled ? "GPU_SAFE" : "CORE";
+                        StartupBreadcrumbLogger.WriteOnce($"LHM_{scope}_OPEN_BEGIN");
+                        computer.Open();
+                        StartupBreadcrumbLogger.WriteOnce($"LHM_{scope}_OPEN_OK");
+                        foreach (var hardware in computer.Hardware)
+                        {
+                            CollectReadings(hardware, readings, cancellationToken);
+                        }
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            computer.Close();
+                        }
+                        catch
+                        {
+                            // Closing a partially opened provider must not mask data
+                            // already read or surface as an application failure.
+                        }
+                    }
+            }
 
-                return CreateSnapshot(readings);
-            }
-            finally
-            {
-                try
-                {
-                    computer.Close();
-                }
-                catch
-                {
-                    // Closing a partially opened provider must not mask data
-                    // already read or surface as an application failure.
-                }
-            }
+            return CreateSnapshot(readings);
         }
 
         private static void CollectReadings(

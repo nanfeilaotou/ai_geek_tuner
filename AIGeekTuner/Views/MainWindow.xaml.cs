@@ -11,6 +11,7 @@ using AIGeekTuner.Services.AI.Providers.Credentials;
 using AIGeekTuner.Services.AI.Providers.Runtime;
 using AIGeekTuner.Services.AI.Providers.Transport;
 using AIGeekTuner.Services.Diagnosis;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Dialogs;
 using AIGeekTuner.Services.Files;
 using AIGeekTuner.Services.Hardware;
@@ -76,7 +77,9 @@ namespace AIGeekTuner
 
         public MainWindow()
         {
+            StartupBreadcrumbLogger.Write("MAINWINDOW_CTOR_BEGIN");
             InitializeComponent();
+            StartupBreadcrumbLogger.Write("INITIALIZE_COMPONENT_DONE");
             _normalWidth = Width;
             _normalHeight = Height;
             UpdateCaptionGlyphs();
@@ -139,6 +142,7 @@ namespace AIGeekTuner
             var startupSettings = _applicationSettingsService.Current;
             if (startupSettings.HardwareAutoRefresh)
             {
+                StartupBreadcrumbLogger.Write("FIRST_TELEMETRY_BEGIN");
                 liveTelemetry.Start(startupSettings.HardwareRefreshIntervalMs);
             }
 
@@ -254,6 +258,8 @@ namespace AIGeekTuner
             // Route startup through the same command path as sidebar navigation so
             // CurrentPageName/CurrentPageDisplayName are initialized for the caption.
             mainWindowViewModel.ShowDashboardCommand.Execute(null);
+            StartupBreadcrumbLogger.Write("DASHBOARD_NAVIGATED");
+            StartupBreadcrumbLogger.Write("MAINWINDOW_CTOR_END");
         }
 
         private void MinimizeButton_Click(object sender, RoutedEventArgs e) =>
@@ -267,13 +273,25 @@ namespace AIGeekTuner
 
         protected override void OnSourceInitialized(EventArgs e)
         {
+            StartupBreadcrumbLogger.Write("SOURCE_INITIALIZED");
             // DWM is optional: unsupported Windows versions and remote sessions
             // safely remain square without affecting startup.
             WindowCornerController.TryApplyRoundedCorners(this);
-            _windowChromeHitTestRouter = new WindowChromeHitTestRouter(this);
-            // WindowChromeWorker subscribes to SourceInitialized; calling base
-            // after our hook installs it deterministically after this router.
             base.OnSourceInitialized(e);
+            _windowChromeHitTestRouter = new WindowChromeHitTestRouter(this);
+            StartupBreadcrumbLogger.Write(
+                _windowChromeHitTestRouter.IsAttached
+                    ? "WINDOW_NATIVE_ROUTER_READY"
+                    : "WINDOW_NATIVE_ROUTER_FAILED");
+        }
+
+        private void Window_Loaded(object sender, RoutedEventArgs e) =>
+            StartupBreadcrumbLogger.Write("LOADED");
+
+        private void Window_ContentRendered(object? sender, EventArgs e)
+        {
+            StartupBreadcrumbLogger.Write("CONTENT_RENDERED");
+            StartupBreadcrumbLogger.Write("READY");
         }
 
         private void Window_StateChanged(object? sender, EventArgs e)

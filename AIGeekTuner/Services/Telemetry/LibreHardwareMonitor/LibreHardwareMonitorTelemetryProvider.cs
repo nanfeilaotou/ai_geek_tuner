@@ -1,13 +1,14 @@
 using System.Globalization;
 using AIGeekTuner.Models.Telemetry;
+using AIGeekTuner.Services.Diagnostics;
 using LibreHardwareMonitor.Hardware;
 
 namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
 {
     /// <summary>
     /// 把现有 LibreHardwareMonitor 能力接入统一遥测层的 Provider。
-    /// 刻意不改动 V1 的 <see cref="global::AIGeekTuner.Services.Hardware.LibreHardwareMonitorSensorService"/>：
-    /// 本类型独立遍历硬件树并输出 Raw 读数，V1 展示路径保持原样（兼容 + 渐进接入）。
+    /// 本类型独立遍历硬件树并输出 Raw 读数；V1 展示路径使用同一安全的
+    /// CPU/GPU 分离配置，保持兼容并避免触发 LHM Intel GCL。
     /// 业务性失败以状态表达；意外异常向上抛出，由 Hub 统一隔离与留痕。
     /// </summary>
     public sealed class LibreHardwareMonitorTelemetryProvider : ITelemetryProvider
@@ -24,30 +25,46 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var computer = new Computer
+            var computers = new[]
             {
-                IsCpuEnabled = true,
-                IsGpuEnabled = true,
-                IsMemoryEnabled = true,
-                IsStorageEnabled = true
+                (Scope: "CORE", Computer: LibreHardwareMonitorComputerFactory.CreateCoreComputer()),
+                (Scope: "GPU_SAFE", Computer: LibreHardwareMonitorComputerFactory.CreateGpuComputer())
             };
+            var capturedAtUtc = DateTimeOffset.UtcNow;
+            var nodes = new List<HardwareNode>();
 
-            try
+            foreach (var (scope, computer) in computers)
             {
-                computer.Open();
-                var capturedAtUtc = DateTimeOffset.UtcNow;
-                var nodes = new List<HardwareNode>();
+                    try
+                    {
+                        StartupBreadcrumbLogger.WriteOnce($"LHM_{scope}_OPEN_BEGIN");
+                        computer.Open();
+                        StartupBreadcrumbLogger.WriteOnce($"LHM_{scope}_OPEN_OK");
+                        foreach (var hardware in computer.Hardware)
+                        {
+                            Visit(hardware, nodes, cancellationToken);
+                        }
+                    }
+                    finally
+                    {
+                        try
+                        {
+                            computer.Close();
+                        }
+                        catch
+                        {
+                            // Closing a partially opened provider cannot mask
+                            // the read result or turn an optional source into a
+                            // process-level failure.
+                        }
+                    }
+            }
 
-                foreach (var hardware in computer.Hardware)
-                {
-                    Visit(hardware, nodes, cancellationToken);
-                }
+            var devices = AssignDeviceIdentities(nodes);
+            var rawReadings = MaterializeRawReadings(nodes, devices.Identities, devices.Infos, capturedAtUtc);
+            var canonicalReadings = LibreHardwareMonitorCanonicalMapper.Map(rawReadings);
 
-                var devices = AssignDeviceIdentities(nodes);
-                var rawReadings = MaterializeRawReadings(nodes, devices.Identities, devices.Infos, capturedAtUtc);
-                var canonicalReadings = LibreHardwareMonitorCanonicalMapper.Map(rawReadings);
-
-                return new TelemetryProviderResult(
+            return new TelemetryProviderResult(
                     TelemetrySourceStatus.Ready,
                     $"内置传感器读取成功（{rawReadings.Count} 项）。",
                     rawReadings,
@@ -58,18 +75,6 @@ namespace AIGeekTuner.Services.Telemetry.LibreHardwareMonitor
                         .Select(group => group.First())
                         .ToArray());
             }
-            finally
-            {
-                try
-                {
-                    computer.Close();
-                }
-                catch
-                {
-                    // 关闭半初始化的 provider 不能掩盖已读取的数据或伪装成应用失败。
-                }
-            }
-        }
 
         private static void Visit(
             IHardware hardware,

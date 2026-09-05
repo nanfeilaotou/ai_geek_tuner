@@ -13,7 +13,9 @@ namespace AIGeekTuner
 
         protected override void OnStartup(StartupEventArgs e)
         {
+            StartupBreadcrumbLogger.Write("PROCESS_START");
             base.OnStartup(e);
+            StartupBreadcrumbLogger.Write("APP_STARTUP");
             DispatcherUnhandledException += OnDispatcherUnhandledException;
             AppDomain.CurrentDomain.UnhandledException += OnAppDomainUnhandledException;
             TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
