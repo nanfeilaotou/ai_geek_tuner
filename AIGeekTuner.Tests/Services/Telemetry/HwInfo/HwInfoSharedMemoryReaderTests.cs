@@ -6,7 +6,9 @@ namespace AIGeekTuner.Tests.Services.Telemetry.HwInfo
     /// <summary>§26 HWiNFO parser 边界：header 全部字段按不可信输入处理。</summary>
     public class HwInfoSharedMemoryReaderTests
     {
-        private const string TestMapName = @"Global\AIGEEKTUNER_TEST_SHM";
+        // Test-only mapping: Local avoids requiring SeCreateGlobalPrivilege under a normal user.
+        // Production reader semantics remain Global\HWiNFO_SENS_SM2.
+        private const string TestMapName = @"Local\AIGEEKTUNER_TEST_SHM";
         private int _mapSequence;
 
         private HwInfoMappingFixture DefaultFixture()

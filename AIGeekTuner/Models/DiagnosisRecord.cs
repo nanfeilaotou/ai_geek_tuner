@@ -11,6 +11,9 @@ namespace AIGeekTuner.Models
     {
         public required Guid DiagnosisId { get; init; }
 
+        /// <summary>产生该结果的输入/操作身份；旧索引缺省为 Empty。</summary>
+        public Guid RequestId { get; init; }
+
         public required DateTimeOffset CreatedAt { get; init; }
 
         public required string LogFileName { get; init; }

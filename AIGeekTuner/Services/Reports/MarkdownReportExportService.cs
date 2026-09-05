@@ -119,6 +119,10 @@ namespace AIGeekTuner.Services.Reports
             builder.AppendLine("## 基本信息");
             builder.AppendLine();
             builder.AppendLine($"- 诊断时间：{outcome.CompletedAt.ToLocalTime():yyyy-MM-dd HH:mm:ss}");
+            if (outcome.Request.RequestId != Guid.Empty)
+            {
+                builder.AppendLine($"- 请求 ID：{outcome.Request.RequestId}");
+            }
             builder.AppendLine($"- 原始日志名称：{GetLogDisplayName(outcome.Request.FaultLog.FileName)}");
             builder.AppendLine();
         }
@@ -164,7 +168,7 @@ namespace AIGeekTuner.Services.Reports
             builder.AppendLine();
             AppendList(builder, evidence
                 .Where(item => item.Kind == EvidenceKind.Fact)
-                .Select(item => item.Description));
+                .Select(FormatFactEvidence));
             builder.AppendLine();
             builder.AppendLine("### AI 推测");
             builder.AppendLine();
@@ -256,6 +260,25 @@ namespace AIGeekTuner.Services.Reports
                 builder.AppendLine($"- {NormalizeInline(item)}");
             }
         }
+
+        private static string FormatFactEvidence(DiagnosticEvidence evidence)
+        {
+            if (string.IsNullOrWhiteSpace(evidence.SourceQuote))
+            {
+                return evidence.Description;
+            }
+
+            return $"[{GetSourceLabel(evidence.SourceId)}] {evidence.SourceQuote.Trim()}";
+        }
+
+        private static string GetSourceLabel(string? sourceId) => sourceId switch
+        {
+            DiagnosticEvidenceSourceIds.UserDescription => "用户描述",
+            DiagnosticEvidenceSourceIds.FaultLog => "故障日志",
+            DiagnosticEvidenceSourceIds.HardwareContext => "硬件上下文",
+            DiagnosticEvidenceSourceIds.SystemContext => "系统上下文",
+            _ => "输入来源"
+        };
 
         private static string GetLogDisplayName(string? fileName)
         {

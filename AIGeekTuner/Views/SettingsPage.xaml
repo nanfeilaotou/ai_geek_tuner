@@ -230,7 +230,7 @@
 
             <StackPanel Grid.Row="0" Margin="0,0,0,20">
                 <TextBlock Text="设置" Style="{StaticResource PageTitleStyle}"/>
-                <TextBlock Text="配置本地 AI 服务与诊断参数，保存后下一次诊断立即生效"
+                <TextBlock Text="配置 AI 服务提供方与诊断参数，保存后下一次诊断立即生效"
                            Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
 
@@ -801,7 +801,7 @@
                                     <TextBlock Text="v1.0.0" Foreground="#DDF8FF" FontWeight="Bold"/>
                                 </Border>
                             </Grid>
-                            <TextBlock Text="本地 AI PC 硬件故障辅助诊断工具。诊断流程完全在本机完成：硬件信息、日志与推理请求均不经过云端。"
+                            <TextBlock Text="AI PC 硬件故障辅助诊断工具。硬件采集与 SafetyGuard 在本机完成；若使用云端 AI Provider，诊断上下文将发送至所配置的 Provider。"
                                        Style="{StaticResource SettingsHintStyle}" Margin="0,8,0,0"/>
                         </StackPanel>
                     </Border>

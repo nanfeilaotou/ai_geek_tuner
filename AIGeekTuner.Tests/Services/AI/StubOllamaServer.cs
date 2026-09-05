@@ -44,6 +44,13 @@ public sealed class StubOllamaServer : HttpMessageHandler
 }
 """;
 
+    public static string GroundedDiagnosticJson(string sourceQuote) =>
+        ValidDiagnosticJson.Replace(
+            "{ \"kind\": \"Fact\", \"description\": \"日志中记录 TM5 Error 2\" }",
+            "{ \"kind\": \"Fact\", \"description\": \"日志中记录 TM5 Error 2\", "
+            + "\"sourceId\": \"source:fault-log\", \"sourceQuote\": "
+            + JsonSerializer.Serialize(sourceQuote) + " }");
+
 
     public void EnqueueTextResponse(string content)
     {

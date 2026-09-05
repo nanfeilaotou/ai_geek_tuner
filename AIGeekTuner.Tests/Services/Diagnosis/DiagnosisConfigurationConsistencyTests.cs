@@ -31,9 +31,9 @@ public class DiagnosisConfigurationConsistencyTests : IDisposable
     {
         // tags 门控：readiness 尚未返回、prompt/chat 均未开始时替换 Provider 配置。
         var tagsGate = _server.GateRawResponse(TagsWithBothModels);
-        _server.EnqueueTextResponse(StubOllamaServer.ValidDiagnosticJson);
+        _server.EnqueueTextResponse(StubOllamaServer.GroundedDiagnosticJson("log"));
         _server.EnqueueTags(TagsWithBothModels); // 第二次诊断的 readiness
-        _server.EnqueueTextResponse(StubOllamaServer.ValidDiagnosticJson);
+        _server.EnqueueTextResponse(StubOllamaServer.GroundedDiagnosticJson("log"));
 
         var store = new ScriptedProviderStore(CreateConfiguration(
             id: "ollama",
@@ -222,7 +222,7 @@ public class DiagnosisConfigurationConsistencyTests : IDisposable
                 CpuName = "TEST",
                 DetectedAt = DateTimeOffset.UtcNow
             },
-            FaultLog = FaultLog.FromPastedText(log)
+            FaultLog = FaultLog.FromPastedText(log + " log")
         };
 
     /// <summary>chat 请求体 messages[1].content 内嵌一层 JSON 用户上下文。</summary>
@@ -233,7 +233,10 @@ public class DiagnosisConfigurationConsistencyTests : IDisposable
             .GetProperty("messages")[1]
             .GetProperty("content")
             .GetString()!;
-        return JsonDocument.Parse(userContent[userContent.IndexOf('{')..]);
+        var jsonStart = userContent.IndexOf('{');
+        var sourceMarker = userContent.IndexOf("\n[source:", jsonStart, StringComparison.Ordinal);
+        var jsonEnd = sourceMarker >= 0 ? sourceMarker : userContent.Length;
+        return JsonDocument.Parse(userContent[jsonStart..jsonEnd]);
     }
 
     private static bool GetWasTruncated(JsonDocument userContext)

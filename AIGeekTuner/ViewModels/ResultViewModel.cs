@@ -60,6 +60,13 @@ namespace AIGeekTuner.ViewModels
             Result?.Evidence.Where(item => item.Kind == EvidenceKind.Inference).ToArray()
             ?? Array.Empty<DiagnosticEvidence>();
 
+        /// <summary>
+        /// 新 grounding Fact 的主展示文本只能来自原始 SourceQuote；旧历史没有 quote
+        /// 时才回退到 Description，以保持历史可读性。
+        /// </summary>
+        public IReadOnlyList<string> FactEvidenceDisplay =>
+            FactEvidence.Select(FormatFactEvidence).ToArray();
+
         public string FactEvidenceCountText => $"{FactEvidence.Count} 条";
 
         public string InferenceEvidenceCountText => $"{InferenceEvidence.Count} 条";
@@ -130,5 +137,24 @@ namespace AIGeekTuner.ViewModels
                 ExportStatusMessage = "报告导出失败，请稍后重试。";
             }
         }
+
+        private string FormatFactEvidence(DiagnosticEvidence evidence)
+        {
+            if (string.IsNullOrWhiteSpace(evidence.SourceQuote))
+            {
+                return evidence.Description;
+            }
+
+            return $"[{GetSourceLabel(evidence.SourceId)}] {evidence.SourceQuote.Trim()}";
+        }
+
+        private static string GetSourceLabel(string? sourceId) => sourceId switch
+        {
+            DiagnosticEvidenceSourceIds.UserDescription => "用户描述",
+            DiagnosticEvidenceSourceIds.FaultLog => "故障日志",
+            DiagnosticEvidenceSourceIds.HardwareContext => "硬件上下文",
+            DiagnosticEvidenceSourceIds.SystemContext => "系统上下文",
+            _ => "输入来源"
+        };
     }
 }

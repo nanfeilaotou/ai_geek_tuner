@@ -29,6 +29,7 @@ namespace AIGeekTuner.ViewModels
         private readonly IApplicationSettingsService _applicationSettingsService;
         private readonly DiagnosticConfigurationStore _configurationStore;
         private readonly LatestDiagnosisState _latestDiagnosisState;
+        private readonly AiProviderSettingsViewModel? _aiProviderSettings;
         private readonly AsyncRelayCommand _selectFileCommand;
         private readonly AsyncRelayCommand _startDiagnosisCommand;
         private readonly RelayCommand _cancelCommand;
@@ -48,6 +49,7 @@ namespace AIGeekTuner.ViewModels
         private bool _hasError;
         private bool _isLoading;
         private bool _isApplyingFileContent;
+        private Guid? _activeRequestId;
 
         public DiagnosisViewModel(
             INavigationService navigationService,
@@ -60,7 +62,8 @@ namespace AIGeekTuner.ViewModels
             IDiagnosticKnowledgeService knowledgeService,
             IApplicationSettingsService applicationSettingsService,
             DiagnosticConfigurationStore configurationStore,
-            LatestDiagnosisState latestDiagnosisState)
+            LatestDiagnosisState latestDiagnosisState,
+            AiProviderSettingsViewModel? aiProviderSettings = null)
         {
             _navigationService = navigationService ?? throw new ArgumentNullException(nameof(navigationService));
             _filePickerService = filePickerService ?? throw new ArgumentNullException(nameof(filePickerService));
@@ -75,6 +78,7 @@ namespace AIGeekTuner.ViewModels
             _configurationStore = configurationStore
                 ?? throw new ArgumentNullException(nameof(configurationStore));
             _latestDiagnosisState = latestDiagnosisState ?? throw new ArgumentNullException(nameof(latestDiagnosisState));
+            _aiProviderSettings = aiProviderSettings;
 
             _selectFileCommand = new AsyncRelayCommand(SelectFileAsync, () => !IsLoading);
             _startDiagnosisCommand = new AsyncRelayCommand(
@@ -116,6 +120,9 @@ namespace AIGeekTuner.ViewModels
         public string SafetyStepStatus { get => _safetyStepStatus; private set => SetProperty(ref _safetyStepStatus, value); }
         public string? ErrorMessage { get => _errorMessage; private set => SetProperty(ref _errorMessage, value); }
         public bool HasError { get => _hasError; private set => SetProperty(ref _hasError, value); }
+
+        public string CurrentAiDisplay => _aiProviderSettings?.ActiveProviderDisplay
+            ?? "当前 AI Provider（请在设置中配置）";
 
         public bool IsLoading
         {
@@ -172,6 +179,12 @@ namespace AIGeekTuner.ViewModels
                 var diagnosisStopwatch = Stopwatch.StartNew();
 
                 var faultLog = CreateFaultLog();
+                // 所有用户可变输入必须在第一个 await 之前快照；后续只使用 request。
+                var userDescription = NormalizeUserDescription(UserDescription);
+                var logFileName = _selectedFaultLog?.FileName;
+                var requestId = Guid.NewGuid();
+                var configuration = _configurationStore.Snapshot();
+                _activeRequestId = requestId;
                 StatusMessage = "正在读取本机真实硬件信息...";
                 var hardware = await _hardwareDetectionService.DetectAsync(cancellationToken);
                 var systemContext = await CollectSystemContextSafelyAsync(
@@ -186,11 +199,12 @@ namespace AIGeekTuner.ViewModels
                 StatusMessage = "正在调用当前 AI 服务；返回后将自动执行 SafetyGuard...";
 
                 // 本次诊断的唯一配置快照：readiness、prompt、模型请求共用。
-                var configuration = _configurationStore.Snapshot();
                 var request = new DiagnosticRequest
                 {
+                    RequestId = requestId,
                     Hardware = hardware,
                     FaultLog = faultLog,
+                    UserDescription = userDescription,
                     SystemContext = systemContext,
                     KnowledgeContext = knowledgeContext,
                     RequestedAt = DateTimeOffset.UtcNow
@@ -224,14 +238,15 @@ namespace AIGeekTuner.ViewModels
                         diagnosisStopwatch.ElapsedMilliseconds,
                         cancellationToken,
                         exception.ModelName,
-                        exception.ProviderName);
+                        exception.ProviderName,
+                        logFileName,
+                        requestId);
                     throw;
                 }
 
                 AiStepStatus = "已完成";
                 SafetyStepStatus = "已完成";
                 PhaseText = "诊断完成";
-                _latestDiagnosisState.Outcome = outcome;
                 if (_applicationSettingsService.Current.AutoSaveDiagnosisHistory)
                 {
                     StatusMessage = "诊断完成，正在保存本地报告...";
@@ -249,15 +264,18 @@ namespace AIGeekTuner.ViewModels
                     StatusMessage = "诊断与安全检查已完成；本次报告未自动保存";
                 }
 
-                if (_navigationService.IsCurrent(AppPage.Diagnosis))
+                // History 落盘与当前 UI ownership 分离：旧页面的完成不能抢占新页面。
+                var ownsCurrentPresentation = _activeRequestId == request.RequestId
+                    && _navigationService.IsCurrentDataContext(this);
+                if (ownsCurrentPresentation)
                 {
+                    _latestDiagnosisState.Outcome = outcome;
                     _navigationService.NavigateTo(AppPage.Result, outcome);
                 }
                 else
                 {
-                    // 用户已离开诊断页：不强行拉回；
-                    // 结果已写入 LatestDiagnosisState，可通过侧栏「诊断报告」入口查看。
-                    StatusMessage = "诊断已完成，结果已保留在「诊断报告」入口";
+                    // 用户已离开诊断页，或 active run 已变化：仅保留历史，不修改当前 UI。
+                    StatusMessage = "诊断已完成，结果已保留在历史记录";
                 }
             });
         }
@@ -269,7 +287,9 @@ namespace AIGeekTuner.ViewModels
             long elapsedMs,
             CancellationToken cancellationToken,
             string? modelName = null,
-            string? providerName = null)
+            string? providerName = null,
+            string? logFileName = null,
+            Guid requestId = default)
         {
             // AutoSave 关闭时成功与失败都不落库，保持语义一致。
             if (!_applicationSettingsService.Current.AutoSaveDiagnosisHistory)
@@ -286,8 +306,9 @@ namespace AIGeekTuner.ViewModels
                         elapsedMs,
                         failureCode,
                         failureReason,
-                        _selectedFaultLog?.FileName,
-                        providerName),
+                        logFileName,
+                        providerName,
+                        requestId),
                     cancellationToken);
             }
             catch (Exception saveFailure)
@@ -299,25 +320,24 @@ namespace AIGeekTuner.ViewModels
 
         private FaultLog CreateFaultLog()
         {
-            var combinedContent = string.IsNullOrWhiteSpace(UserDescription)
-                ? FaultLogText
-                : $"{FaultLogText.TrimEnd()}\n\n[用户描述]\n{UserDescription.Trim()}";
-
             if (_selectedFaultLog is null)
             {
-                return FaultLog.FromPastedText(combinedContent);
+                return FaultLog.FromPastedText(FaultLogText);
             }
 
             return new FaultLog
             {
                 FileName = _selectedFaultLog.FileName,
-                Content = combinedContent,
+                Content = FaultLogText,
                 FileSizeBytes = _selectedFaultLog.FileSizeBytes,
                 CreatedAt = _selectedFaultLog.CreatedAt,
                 SourceType = _selectedFaultLog.SourceType,
                 EncodingName = _selectedFaultLog.EncodingName
             };
         }
+
+        private static string? NormalizeUserDescription(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
         private async Task<AIGeekTuner.Models.SystemContext> CollectSystemContextSafelyAsync(
             CancellationToken cancellationToken)
@@ -380,6 +400,7 @@ namespace AIGeekTuner.ViewModels
             finally
             {
                 if (ReferenceEquals(_operationCancellation, cancellationSource)) _operationCancellation = null;
+                _activeRequestId = null;
                 IsLoading = false;
             }
         }

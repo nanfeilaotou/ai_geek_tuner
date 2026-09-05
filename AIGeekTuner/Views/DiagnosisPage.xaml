@@ -120,7 +120,7 @@
 
         <StackPanel Grid.Row="0" Margin="0,0,0,18">
             <TextBlock Text="AI 智能诊断" Style="{StaticResource PageTitleStyle}"/>
-            <TextBlock Text="导入故障日志，由本地 Ollama 分析并经过 SafetyGuard 检查"
+            <TextBlock Text="导入故障日志，由当前 AI 服务分析并经过本机 SafetyGuard 检查"
                        Style="{StaticResource PageSubtitleStyle}"/>
         </StackPanel>
 
@@ -197,7 +197,7 @@
                                 Command="{Binding CancelCommand}"
                                 Style="{StaticResource DiagnosisSecondaryButtonStyle}"
                                 MinWidth="88" Margin="10,0,0,0"/>
-                        <TextBlock Grid.Column="2" Text="日志只在本机处理"
+                        <TextBlock Grid.Column="2" Text="硬件采集与 SafetyGuard 在本机完成；AI 由当前 Provider 决定"
                                    Foreground="#9DD6E8" FontSize="11"
                                    HorizontalAlignment="Right" VerticalAlignment="Center"/>
                     </Grid>
@@ -225,7 +225,11 @@
                         </Grid.ColumnDefinitions>
                         <StackPanel>
                             <TextBlock Text="诊断状态" Style="{StaticResource SectionTitleStyle}"/>
-                            <TextBlock Text="本地诊断处理流程" Foreground="#A9DBEC" FontSize="11" Margin="0,4,0,0"/>
+                            <TextBlock Text="当前 AI 服务诊断流程" Foreground="#A9DBEC" FontSize="11" Margin="0,4,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                <TextBlock Text="当前 AI：" Foreground="#9FD9EA" FontSize="10"/>
+                                <TextBlock Text="{Binding CurrentAiDisplay}" Foreground="#C6F3FF" FontSize="10" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
                         </StackPanel>
                         <Border Grid.Column="1" Background="#20FFFFFF"
                                 BorderBrush="#2FFFFFFF" BorderThickness="1" Padding="10,5">
@@ -329,8 +333,8 @@
                                 </TextBlock.Style>
                             </TextBlock>
                             <StackPanel Grid.Column="1">
-                                <TextBlock Text="02  调用 Ollama" Foreground="White" FontWeight="SemiBold"/>
-                                <TextBlock Text="本地模型生成结构化诊断" Foreground="#A8D5E5" FontSize="10" Margin="0,3,0,0"/>
+                                <TextBlock Text="02  调用当前 AI" Foreground="White" FontWeight="SemiBold"/>
+                                <TextBlock Text="当前 Provider 生成结构化诊断" Foreground="#A8D5E5" FontSize="10" Margin="0,3,0,0"/>
                             </StackPanel>
                             <TextBlock Grid.Column="2" Text="{Binding AiStepStatus}" Foreground="#D7F6FF" VerticalAlignment="Center" FontSize="11"/>
                         </Grid>

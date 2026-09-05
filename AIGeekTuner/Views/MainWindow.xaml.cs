@@ -59,6 +59,7 @@ namespace AIGeekTuner
         private readonly HardwareInfoViewModel _hardwareInfoViewModel;
         private readonly LatestDiagnosisState _latestDiagnosisState;
         private readonly SettingsViewModel _settingsViewModel;
+        private readonly AiProviderSettingsViewModel _aiProviderSettingsViewModel;
 
         /// <summary>运行时配置中心；设置页保存后整体换入新快照。</summary>
         internal DiagnosticConfigurationStore ConfigurationStore { get; }
@@ -132,8 +133,8 @@ namespace AIGeekTuner
 
             _connectionService = new OllamaConnectionService(_httpClient);
 
-            // V2-M5.1A：Provider Foundation 服务栈——目前只被设置页的 Provider 卡片使用；
-            // 诊断 / Session AI 仍走上面的旧 Ollama runtime，M5.1B 才做运行时切换。
+            // V2-M5.1：Provider Foundation 服务栈；Diagnosis / Session AI 通过统一 runtime
+            // 使用当前激活的 Provider，设置页复用同一份 profile/credential store。
             // 凭据“是否存在”通过委托暴露给 ViewModel，明文不进入 UI 层。
             var providerCredentialStore = new WindowsDpapiCredentialStore(
                 applicationDataPaths.AiCredentialsFilePath);
@@ -167,6 +168,7 @@ namespace AIGeekTuner
                 aiProviderManager,
                 _confirmationDialogService,
                 async providerId => await providerCredentialStore.LoadAsync(providerId) is not null);
+            _aiProviderSettingsViewModel = aiProviderSettingsViewModel;
 
             _settingsViewModel = new SettingsViewModel(
                 _applicationSettingsService,
@@ -228,8 +230,8 @@ namespace AIGeekTuner
                 incidentStore);
 
             var safetyService = new SafetyGuardService();
-            // V2-M5.1B：诊断请求经 AiChatRuntime 走“当前使用”的 Provider；
-            // PromptBuilder / Parser / repair 语义 / SafetyGuard 全部保持原实现。
+            // V2-M5.1B.2：诊断请求经 AiChatRuntime 走当前 Provider；
+            // PromptBuilder / Parser / grounding repair / SafetyGuard 各司其职。
             _diagnosisService = new DiagnosisService(
                 aiChatRuntime,
                 new DiagnosisPromptBuilder(() => ConfigurationStore.Snapshot().Input),
@@ -303,7 +305,8 @@ namespace AIGeekTuner
                         _knowledgeService,
                         _applicationSettingsService,
                         ConfigurationStore,
-                        _latestDiagnosisState)
+                        _latestDiagnosisState,
+                        _aiProviderSettingsViewModel)
                 },
                 AppPage.Result => new ResultPage
                 {
@@ -334,8 +337,6 @@ namespace AIGeekTuner
         }
     }
 }
-
-
 
 
 

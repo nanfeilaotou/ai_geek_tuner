@@ -19,17 +19,20 @@ namespace AIGeekTuner.Services.Diagnosis
         private readonly DiagnosisPromptBuilder _promptBuilder;
         private readonly ISafetyService _safetyService;
         private readonly DiagnosticResultParser _resultParser;
+        private readonly DiagnosticGroundingValidator _groundingValidator;
 
         public DiagnosisService(
             IAiChatRuntime aiRuntime,
             DiagnosisPromptBuilder promptBuilder,
             ISafetyService safetyService,
-            DiagnosticResultParser? resultParser = null)
+            DiagnosticResultParser? resultParser = null,
+            DiagnosticGroundingValidator? groundingValidator = null)
         {
             _aiRuntime = aiRuntime ?? throw new ArgumentNullException(nameof(aiRuntime));
             _promptBuilder = promptBuilder ?? throw new ArgumentNullException(nameof(promptBuilder));
             _safetyService = safetyService ?? throw new ArgumentNullException(nameof(safetyService));
             _resultParser = resultParser ?? new DiagnosticResultParser();
+            _groundingValidator = groundingValidator ?? new DiagnosticGroundingValidator();
         }
 
         public async Task<DiagnosisOutcome> DiagnoseAsync(
@@ -51,11 +54,11 @@ namespace AIGeekTuner.Services.Diagnosis
             await EnsureReadyAsync(runtime, cancellationToken);
 
             string systemPrompt;
-            string userContext;
+            DiagnosticPromptContext promptContext;
             try
             {
                 systemPrompt = _promptBuilder.BuildSystemPrompt();
-                userContext = _promptBuilder.BuildUserContext(
+                promptContext = _promptBuilder.BuildContext(
                     request,
                     configuration.Input);
             }
@@ -70,7 +73,7 @@ namespace AIGeekTuner.Services.Diagnosis
             var messages = new[]
             {
                 new AiChatMessage("system", systemPrompt),
-                new AiChatMessage("user", userContext)
+                new AiChatMessage("user", promptContext.UserMessage)
             };
 
             DiagnosticResult aiResult;
@@ -79,6 +82,7 @@ namespace AIGeekTuner.Services.Diagnosis
                 aiResult = await RunChatWithSingleRepairAsync(
                     runtime,
                     messages,
+                    promptContext,
                     cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -203,6 +207,7 @@ namespace AIGeekTuner.Services.Diagnosis
         private async Task<DiagnosticResult> RunChatWithSingleRepairAsync(
             AiRuntimeSnapshot runtime,
             IReadOnlyList<AiChatMessage> messages,
+            DiagnosticPromptContext promptContext,
             CancellationToken cancellationToken)
         {
             // Gate H：Diagnosis 现契约 = JSON mode + parser 校验（无完整 schema），
@@ -218,18 +223,29 @@ namespace AIGeekTuner.Services.Diagnosis
                 chatOptions,
                 cancellationToken);
 
+            Exception? firstValidationError = null;
             try
             {
-                return _resultParser.Parse(firstResponse);
+                return ParseAndValidate(firstResponse, promptContext);
             }
-            catch (DiagnosticResultParsingException firstError)
+            catch (DiagnosticResultParsingException exception)
+            {
+                firstValidationError = exception;
+            }
+            catch (DiagnosticGroundingValidationException exception)
+            {
+                firstValidationError = exception;
+            }
+
+            try
             {
                 // 只有“模型成功返回文本但结构无效”才做唯一一次修复重试；
-                // HTTP 错误、超时、取消等异常不会进入本分支，直接向上传播。
+                // grounding 错误同样只允许一次修复；HTTP 错误、超时、取消等异常
+                // 不会进入本分支，直接向上传播。
                 var repairMessages = new List<AiChatMessage>(messages)
                 {
                     new("assistant", firstResponse),
-                    new("user", DiagnosisRepairInstruction.Build(firstError))
+                    new("user", BuildRepairInstruction(firstValidationError!))
                 };
                 var repairResponse = await _aiRuntime.SendChatAsync(
                     runtime,
@@ -238,19 +254,42 @@ namespace AIGeekTuner.Services.Diagnosis
                     chatOptions,
                     cancellationToken);
 
-                try
-                {
-                    return _resultParser.Parse(repairResponse);
-                }
-                catch (DiagnosticResultParsingException secondError)
-                {
-                    throw new DiagnosticResultParsingException(
-                        "模型两次输出均无法解析为诊断结果。首次错误：" + firstError.Message
-                        + "；修复后错误：" + secondError.Message,
-                        secondError);
-                }
+                return ParseAndValidate(repairResponse, promptContext);
+            }
+            catch (DiagnosticResultParsingException secondError)
+            {
+                throw new DiagnosticResultParsingException(
+                    "模型两次输出均无法解析或通过 grounding 校验。首次错误："
+                    + firstValidationError!.Message + "；修复后错误：" + secondError.Message,
+                    secondError);
+            }
+            catch (DiagnosticGroundingValidationException secondError)
+            {
+                throw new DiagnosticResultParsingException(
+                    "模型两次输出均无法解析或通过 grounding 校验。首次错误："
+                    + firstValidationError!.Message + "；修复后错误：" + secondError.ToRepairMessage(),
+                    secondError);
             }
         }
+
+        private DiagnosticResult ParseAndValidate(
+            string response,
+            DiagnosticPromptContext promptContext)
+        {
+            var result = _resultParser.Parse(response);
+            _groundingValidator.Validate(result, promptContext);
+            return result;
+        }
+
+        private static string BuildRepairInstruction(Exception validationError) =>
+            validationError switch
+            {
+                DiagnosticResultParsingException parseError =>
+                    DiagnosisRepairInstruction.Build(parseError),
+                DiagnosticGroundingValidationException groundingError =>
+                    DiagnosisRepairInstruction.Build(groundingError),
+                _ => throw new ArgumentOutOfRangeException(nameof(validationError))
+            };
 
         /// <summary>运行时错误 → 诊断异常：用户文案来自脱敏的 <see cref="AiRuntimeException.UserMessage"/>。</summary>
         private static DiagnosisException MapAiRuntimeException(

@@ -82,6 +82,7 @@ namespace AIGeekTuner.Services.History
                     Outcome = outcome,
                     ModelName = modelName,
                     ProviderName = providerName,
+                    RequestId = outcome.Request.RequestId,
                     DurationMs = durationMs
                 };
                 await WriteJsonAtomicallyAsync(outcomePath, detail, cancellationToken);
@@ -128,6 +129,7 @@ namespace AIGeekTuner.Services.History
                     FailureCode = failure.FailureCode,
                     ModelName = failure.ModelName,
                     ProviderName = failure.ProviderName,
+                    RequestId = failure.RequestId == Guid.Empty ? null : failure.RequestId,
                     DurationMs = failure.DurationMs,
                     CompletedAt = failure.CompletedAt.ToUniversalTime()
                 };
@@ -136,6 +138,7 @@ namespace AIGeekTuner.Services.History
                 var record = new DiagnosisRecord
                 {
                     DiagnosisId = diagnosisId,
+                    RequestId = failure.RequestId,
                     CreatedAt = failure.CompletedAt.ToUniversalTime(),
                     LogFileName = string.IsNullOrWhiteSpace(failure.LogFileName)
                         ? PastedLogName
@@ -508,6 +511,7 @@ namespace AIGeekTuner.Services.History
             string? providerName = null) => new()
         {
             DiagnosisId = outcome.DiagnosisId,
+            RequestId = outcome.Request.RequestId,
             CreatedAt = outcome.CompletedAt.ToUniversalTime(),
             LogFileName = string.IsNullOrWhiteSpace(outcome.Request.FaultLog.FileName)
                 ? PastedLogName

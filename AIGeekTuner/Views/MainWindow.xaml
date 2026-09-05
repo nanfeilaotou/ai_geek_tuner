@@ -57,9 +57,9 @@
 
                 <StackPanel Grid.Row="2" Margin="22,18,18,22">
                     <Border Height="1" Background="#3978B5" Margin="0,0,0,14"/>
-                    <TextBlock Text="LOCAL · PRIVATE · SAFE" FontSize="9"
+                    <TextBlock Text="LOCAL HARDWARE · AI ASSISTED" FontSize="9"
                                Foreground="{DynamicResource MutedTextBrush}"/>
-                    <TextBlock Text="v1.0.0 · 本地诊断基础版" FontSize="11"
+                    <TextBlock Text="v1.0.0 · AI 辅助诊断" FontSize="11"
                                Foreground="{DynamicResource SecondaryTextBrush}" Margin="0,4,0,0"/>
                 </StackPanel>
             </Grid>

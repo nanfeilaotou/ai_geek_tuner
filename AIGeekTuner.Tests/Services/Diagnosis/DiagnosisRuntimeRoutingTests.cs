@@ -32,7 +32,7 @@ public class DiagnosisRuntimeRoutingTests : IDisposable
         _server.EnqueueTags("""
 {"models":[{"name":"qwen3:8b"}]}
 """);
-        _server.EnqueueTextResponse(StubOllamaServer.ValidDiagnosticJson);
+        _server.EnqueueTextResponse(StubOllamaServer.GroundedDiagnosticJson("E1"));
 
         var service = CreateService(store);
         var outcome = await service.DiagnoseAsync(
@@ -52,7 +52,7 @@ public class DiagnosisRuntimeRoutingTests : IDisposable
             baseUrl: "http://lmstudio.local:1234/v1", modelId: "qwen2.5-7b-instruct",
             mode: AiStructuredOutputMode.OpenAiJsonSchema, activeId: "lmstudio");
         // OpenAI 兼容响应的 content 是一段合法的诊断 JSON。
-        var validJson = StubOllamaServer.ValidDiagnosticJson.Replace("\r", " ").Replace("\n", " ");
+        var validJson = StubOllamaServer.GroundedDiagnosticJson("E1").Replace("\r", " ").Replace("\n", " ");
         var prefix = """
 {"choices":[{"message":{"role":"assistant","content":
 """;
@@ -81,7 +81,7 @@ public class DiagnosisRuntimeRoutingTests : IDisposable
 {"models":[{"name":"qwen3:8b"}]}
 """);
         _server.EnqueueTextResponse("这不是 JSON");
-        _server.EnqueueTextResponse(StubOllamaServer.ValidDiagnosticJson);
+        _server.EnqueueTextResponse(StubOllamaServer.GroundedDiagnosticJson("E1"));
 
         var service = CreateService(store);
         var outcome = await service.DiagnoseAsync(
@@ -208,7 +208,7 @@ public class DiagnosisRuntimeRoutingTests : IDisposable
         _server.EnqueueTags("""
 {"models":[{"name":"qwen3:8b"}]}
 """);
-        _server.EnqueueTextResponse(StubOllamaServer.ValidDiagnosticJson);
+        _server.EnqueueTextResponse(StubOllamaServer.GroundedDiagnosticJson("E1"));
 
         var service = CreateService(store);
         var outcome = await service.DiagnoseAsync(

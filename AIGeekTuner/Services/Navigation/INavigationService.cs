@@ -10,6 +10,13 @@ namespace AIGeekTuner.Services.Navigation
         /// </summary>
         bool IsCurrent(AppPage page);
 
+        /// <summary>
+        /// 判断当前 Frame 是否仍展示同一个页面 DataContext 实例。
+        /// 未提供实例能力的 host 默认拒绝声明 ownership；WPF 实现使用 reference identity。
+        /// </summary>
+        bool IsCurrentDataContext(object dataContext) =>
+            false;
+
         void NavigateTo(AppPage page, object? parameter = null);
 
         void GoBack();

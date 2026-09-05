@@ -1,4 +1,5 @@
 using System.Windows.Controls;
+using System.Windows;
 using System.Windows.Navigation;
 
 namespace AIGeekTuner.Services.Navigation
@@ -23,6 +24,13 @@ namespace AIGeekTuner.Services.Navigation
         public bool CanGoBack => _frame.CanGoBack;
 
         public bool IsCurrent(AppPage page) => _currentPage == page;
+
+        public bool IsCurrentDataContext(object dataContext)
+        {
+            ArgumentNullException.ThrowIfNull(dataContext);
+            return _frame.Content is FrameworkElement element
+                && ReferenceEquals(element.DataContext, dataContext);
+        }
 
         public void NavigateTo(AppPage page, object? parameter = null)
         {

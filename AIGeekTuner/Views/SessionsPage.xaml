@@ -246,7 +246,7 @@
                     <StackPanel>
                         <Grid Margin="0,0,0,6">
                             <TextBlock Text="AI 分析" Style="{StaticResource SectionTitleStyle}"/>
-                            <Button Content="使用本地模型分析本次录制"
+                            <Button Content="使用当前 AI 分析本次录制"
                                     Command="{Binding AnalyzeCommand}"
                                     Style="{StaticResource SecondaryButtonStyle}"
                                     Padding="12,6" HorizontalAlignment="Right"/>
