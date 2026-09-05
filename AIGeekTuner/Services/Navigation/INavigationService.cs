@@ -1,5 +1,14 @@
 namespace AIGeekTuner.Services.Navigation
 {
+    /// <summary>
+    /// Optional notification seam for hosts that can observe the actual Frame page.
+    /// It keeps shell display state synchronized for programmatic navigation too.
+    /// </summary>
+    public interface IPageNavigationNotifications
+    {
+        event Action<AppPage>? CurrentPageChanged;
+    }
+
     public interface INavigationService
     {
         bool CanGoBack { get; }

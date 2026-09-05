@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using AIGeekTuner.Views.Behaviors;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
 using AIGeekTuner.Services.AI;
@@ -73,6 +74,7 @@ namespace AIGeekTuner
         public MainWindow()
         {
             InitializeComponent();
+            UpdateCaptionGlyphs();
 
             var applicationDataPaths = ApplicationDataPaths.Default;
             _httpClient = new HttpClient();
@@ -238,8 +240,39 @@ namespace AIGeekTuner
                 safetyService);
 
             _navigationService = new FrameNavigationService(MainFrame, CreatePage);
-            DataContext = new MainWindowViewModel(_navigationService);
-            _navigationService.NavigateTo(AppPage.Dashboard);
+            var mainWindowViewModel = new MainWindowViewModel(_navigationService);
+            DataContext = mainWindowViewModel;
+            // Route startup through the same command path as sidebar navigation so
+            // CurrentPageName/CurrentPageDisplayName are initialized for the caption.
+            mainWindowViewModel.ShowDashboardCommand.Execute(null);
+        }
+
+        private void MinimizeButton_Click(object sender, RoutedEventArgs e) =>
+            WindowChromeController.Minimize(this);
+
+        private void MaximizeButton_Click(object sender, RoutedEventArgs e) =>
+            WindowChromeController.ToggleMaximize(this);
+
+        private void CloseButton_Click(object sender, RoutedEventArgs e) =>
+            WindowChromeController.Close(this);
+
+        private void Window_StateChanged(object? sender, EventArgs e) =>
+            UpdateCaptionGlyphs();
+
+        private void UpdateCaptionGlyphs()
+        {
+            if (MaximizeGlyph is null || RestoreGlyph is null)
+            {
+                return;
+            }
+
+            var maximized = WindowChromeController.IsMaximized(WindowState);
+            MaximizeGlyph.Visibility = maximized
+                ? Visibility.Collapsed
+                : Visibility.Visible;
+            RestoreGlyph.Visibility = maximized
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         }
 
         private static DiagnosticConfigurationStore CreateConfigurationStore(
@@ -337,7 +370,5 @@ namespace AIGeekTuner
         }
     }
 }
-
-
 
 

@@ -18,6 +18,7 @@ namespace AIGeekTuner.Tests.Views;
 /// 能捕获 StaticResource 缺失、XAML 解析与页面级初始化回归；
 /// 不覆盖视觉布局与交互，那部分仍属人工/Phase 后续验收。
 /// </summary>
+[Collection("WpfSmoke")]
 public class PageConstructionSmokeTests
 {
     [Fact]

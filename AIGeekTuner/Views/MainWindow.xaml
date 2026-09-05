@@ -1,12 +1,24 @@
 <Window x:Class="AIGeekTuner.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        xmlns:behavior="clr-namespace:AIGeekTuner.Views.Behaviors"
         Title="{Binding Title}" Height="760" Width="1180"
         MinHeight="680" MinWidth="1024"
         WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        ResizeMode="CanResize"
         Background="{DynamicResource AppBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
-        UseLayoutRounding="True" SnapsToDevicePixels="True">
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        StateChanged="Window_StateChanged">
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="40"
+                            ResizeBorderThickness="6"
+                            GlassFrameThickness="0"
+                            CornerRadius="0"
+                            UseAeroCaptionButtons="False"/>
+    </shell:WindowChrome.WindowChrome>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="208"/>
@@ -14,6 +26,7 @@
         </Grid.ColumnDefinitions>
 
         <Border Grid.Column="0" Background="{DynamicResource ShellBackgroundBrush}"
+                behavior:WindowDragRegion.IsDragRegion="True"
                 BorderBrush="#3378BB" BorderThickness="0,0,1,0">
             <Grid>
                 <Grid.RowDefinitions>
@@ -44,7 +57,7 @@
                     <Button Content="◉   数据录制" Command="{Binding ShowSessionsCommand}"
                             Style="{StaticResource NavigationSelectedableStyle}"
                             Tag="Sessions" Margin="0,2"/>
-                                        <Button Content="▧   诊断报告" Command="{Binding ShowResultCommand}"
+                    <Button Content="▧   诊断报告" Command="{Binding ShowResultCommand}"
                             Style="{StaticResource NavigationSelectedableStyle}"
                             Tag="Result" Margin="0,2"/>
                     <Button Content="▤   日志管理" Command="{Binding ShowHistoryCommand}"
@@ -66,7 +79,79 @@
         </Border>
 
         <Grid Grid.Column="1" Background="{DynamicResource AppBackgroundBrush}">
-            <Frame x:Name="MainFrame" NavigationUIVisibility="Hidden"/>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <Border x:Name="TitleBar"
+                    Grid.Row="0"
+                    Background="{DynamicResource PanelBackgroundBrush}"
+                    BorderBrush="#24FFFFFF"
+                    BorderThickness="0,0,0,1"
+                    Padding="16,0,0,0"
+                    behavior:WindowDragRegion.IsDragRegion="True"
+                    shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                <Grid>
+                    <TextBlock Text="{Binding CurrentPageDisplayName}"
+                               Foreground="{DynamicResource PrimaryTextBrush}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+
+                    <StackPanel HorizontalAlignment="Right"
+                                Orientation="Horizontal"
+                                VerticalAlignment="Stretch">
+                        <Button x:Name="MinimizeButton"
+                                Width="46"
+                                AutomationProperties.Name="最小化"
+                                Click="MinimizeButton_Click"
+                                Style="{StaticResource WindowCaptionButtonStyle}"
+                                shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Path Data="M 2,7 L 12,7"
+                                  Stroke="{DynamicResource PrimaryTextBrush}"
+                                  StrokeThickness="1.2"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"/>
+                        </Button>
+                        <Button x:Name="MaximizeButton"
+                                Width="46"
+                                AutomationProperties.Name="最大化 / 还原"
+                                Click="MaximizeButton_Click"
+                                Style="{StaticResource WindowCaptionButtonStyle}"
+                                shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Grid Width="14" Height="14">
+                                <Path x:Name="MaximizeGlyph"
+                                      Data="M 2,2 H 12 V 12 H 2 Z"
+                                      Stroke="{DynamicResource PrimaryTextBrush}"
+                                      StrokeThickness="1.1"
+                                      Fill="Transparent"/>
+                                <Path x:Name="RestoreGlyph"
+                                      Data="M 5,3 H 13 V 11 H 5 Z M 3,5 H 11 V 13 H 3 Z"
+                                      Stroke="{DynamicResource PrimaryTextBrush}"
+                                      StrokeThickness="1.1"
+                                      Fill="{DynamicResource PanelBackgroundBrush}"
+                                      Visibility="Collapsed"/>
+                            </Grid>
+                        </Button>
+                        <Button x:Name="CloseButton"
+                                Width="46"
+                                AutomationProperties.Name="关闭"
+                                Click="CloseButton_Click"
+                                Style="{StaticResource WindowCaptionCloseButtonStyle}"
+                                shell:WindowChrome.IsHitTestVisibleInChrome="True">
+                            <Path Data="M 3,3 L 11,11 M 11,3 L 3,11"
+                                  Stroke="{DynamicResource PrimaryTextBrush}"
+                                  StrokeThickness="1.2"
+                                  HorizontalAlignment="Center"
+                                  VerticalAlignment="Center"/>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <Frame x:Name="MainFrame" Grid.Row="1" NavigationUIVisibility="Hidden"/>
         </Grid>
     </Grid>
 </Window>

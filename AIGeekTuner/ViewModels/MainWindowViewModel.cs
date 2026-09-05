@@ -14,6 +14,11 @@ namespace AIGeekTuner.ViewModels
             ArgumentNullException.ThrowIfNull(navigationService);
             _navigationService = navigationService;
 
+            if (navigationService is IPageNavigationNotifications notifications)
+            {
+                notifications.CurrentPageChanged += OnCurrentPageChanged;
+            }
+
             ShowDashboardCommand = NavigateTo(AppPage.Dashboard);
             ShowHardwareCommand = NavigateTo(AppPage.Hardware);
             ShowDiagnosisCommand = NavigateTo(AppPage.Diagnosis);
@@ -37,12 +42,39 @@ namespace AIGeekTuner.ViewModels
         public string CurrentPageName =>
             _currentPage?.ToString() ?? string.Empty;
 
+        /// <summary>当前页面在 integrated window chrome 中显示的短标题。</summary>
+        public string CurrentPageDisplayName =>
+            _currentPage switch
+            {
+                AppPage.Dashboard => "仪表盘",
+                AppPage.Hardware => "硬件信息",
+                AppPage.Diagnosis => "AI 智能诊断",
+                AppPage.Sessions => "数据录制",
+                AppPage.Result => "诊断报告",
+                AppPage.History => "日志管理",
+                AppPage.Settings => "设置",
+                _ => string.Empty
+            };
+
         private ICommand NavigateTo(AppPage page) =>
             new RelayCommand(() =>
             {
                 _currentPage = page;
                 OnPropertyChanged(nameof(CurrentPageName));
+                OnPropertyChanged(nameof(CurrentPageDisplayName));
                 _navigationService.NavigateTo(page);
             });
+
+        private void OnCurrentPageChanged(AppPage page)
+        {
+            if (_currentPage == page)
+            {
+                return;
+            }
+
+            _currentPage = page;
+            OnPropertyChanged(nameof(CurrentPageName));
+            OnPropertyChanged(nameof(CurrentPageDisplayName));
+        }
     }
 }

@@ -4,7 +4,7 @@ using System.Windows.Navigation;
 
 namespace AIGeekTuner.Services.Navigation
 {
-    public sealed class FrameNavigationService : INavigationService
+    public sealed class FrameNavigationService : INavigationService, IPageNavigationNotifications
     {
         private readonly Frame _frame;
         private readonly Func<AppPage, object?, Page> _pageFactory;
@@ -22,6 +22,8 @@ namespace AIGeekTuner.Services.Navigation
         }
 
         public bool CanGoBack => _frame.CanGoBack;
+
+        public event Action<AppPage>? CurrentPageChanged;
 
         public bool IsCurrent(AppPage page) => _currentPage == page;
 
@@ -49,7 +51,15 @@ namespace AIGeekTuner.Services.Navigation
 
         private void OnFrameNavigated(object sender, NavigationEventArgs e)
         {
-            _currentPage = e.Content is Page { Tag: AppPage page } ? page : null;
+            if (e.Content is Page { Tag: AppPage page })
+            {
+                _currentPage = page;
+                CurrentPageChanged?.Invoke(page);
+            }
+            else
+            {
+                _currentPage = null;
+            }
         }
     }
 }
