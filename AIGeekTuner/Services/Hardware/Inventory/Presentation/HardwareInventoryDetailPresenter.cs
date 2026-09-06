@@ -624,20 +624,29 @@ namespace AIGeekTuner.Services.Hardware.Inventory.Presentation
                 return "—";
             }
 
+            // M5.2C：运行时间精确到秒，秒固定两位，保证逐秒刷新时宽度稳定。
             var days = (int)uptime.TotalDays;
             var hours = uptime.Hours;
             var minutes = uptime.Minutes;
+            var seconds = uptime.Seconds;
             if (days > 0)
             {
-                return string.Create(CultureInfo.InvariantCulture, $"{days} 天 {hours} 小时");
+                return string.Create(
+                    CultureInfo.InvariantCulture, $"{days} 天 {hours} 小时 {minutes} 分 {seconds:D2} 秒");
             }
 
             if (hours > 0)
             {
-                return string.Create(CultureInfo.InvariantCulture, $"{hours} 小时 {minutes} 分");
+                return string.Create(
+                    CultureInfo.InvariantCulture, $"{hours} 小时 {minutes} 分 {seconds:D2} 秒");
             }
 
-            return string.Create(CultureInfo.InvariantCulture, $"{minutes} 分钟");
+            if (minutes > 0)
+            {
+                return string.Create(CultureInfo.InvariantCulture, $"{minutes} 分 {seconds:D2} 秒");
+            }
+
+            return string.Create(CultureInfo.InvariantCulture, $"{seconds} 秒");
         }
     }
 }

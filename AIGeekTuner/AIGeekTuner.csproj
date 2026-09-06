@@ -7,11 +7,23 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- M5.2C：应用图标（exe 资源 / 任务栏 / 资源管理器）。 -->
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Version>2.0.0</Version>
     <AssemblyVersion>2.0.0.0</AssemblyVersion>
     <FileVersion>2.0.0.0</FileVersion>
     <InformationalVersion>2.0.0</InformationalVersion>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- M5.2C：测试项目访问 internal 契约（FormatUptime / FillFromMonitor）。 -->
+    <InternalsVisibleTo Include="AIGeekTuner.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- M5.2C：窗口任务栏/Alt-Tab 图标通过 pack URI 引用该资源。 -->
+    <Resource Include="Assets\AppIcon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />

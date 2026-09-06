@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows.Threading;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Models;
 using AIGeekTuner.Models.Hardware.Inventory;
@@ -23,6 +24,8 @@ namespace AIGeekTuner.ViewModels
         private readonly AsyncRelayCommand _refreshSensorsCommand;
         private readonly RelayCommand _resetRangesCommand;
         private IReadOnlyList<Models.Hardware.Inventory.MemoryModuleInfo> _inventoryMemoryModules = [];
+        private System.Windows.Threading.DispatcherTimer? _uptimeTimer;
+        private DateTimeOffset? _uptimeLastBootUtc;
 
         private string _deviceModel = "正在读取...";
         private string _systemSummary = "正在读取...";
@@ -505,8 +508,10 @@ namespace AIGeekTuner.ViewModels
             // Gate B：顶部第三卡改为运行时间（OS LastBoot / uptime）。
             if (snapshot.Os?.LastBootUtc is { } lastBoot)
             {
-                UptimeDisplay = HardwareInventoryDetailPresenter.FormatUptime(
-                    snapshot.CollectedAtUtc - lastBoot);
+                // M5.2C：记录最近启动时间；显示值由逐秒时钟按"当前时刻 -
+                // LastBoot"计算，不再依赖采集时刻，也不触发任何重新采集。
+                _uptimeLastBootUtc = lastBoot;
+                RefreshUptimeDisplay();
                 LastBootDisplay = "最近启动 "
                     + lastBoot.ToLocalTime().ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture);
             }
@@ -550,6 +555,45 @@ namespace AIGeekTuner.ViewModels
             }
 
             HasInventoryDetail = sections.Length > 0;
+        }
+
+        /// <summary>
+        /// M5.2C：仪表盘运行时间逐秒时钟。仅做字符串计算（当前时刻 -
+        /// LastBoot），不触碰 telemetry、不触发 inventory refresh；
+        /// 由 Dashboard 页面 Loaded/Unloaded 驱动启停。
+        /// </summary>
+        public void StartUptimeClock()
+        {
+            if (_uptimeTimer is not null)
+            {
+                return;
+            }
+
+            var timer = new DispatcherTimer(DispatcherPriority.Background)
+            {
+                Interval = TimeSpan.FromSeconds(1)
+            };
+            timer.Tick += (_, _) => RefreshUptimeDisplay();
+            _uptimeTimer = timer;
+            RefreshUptimeDisplay();
+            timer.Start();
+        }
+
+        public void StopUptimeClock()
+        {
+            _uptimeTimer?.Stop();
+            _uptimeTimer = null;
+        }
+
+        private void RefreshUptimeDisplay()
+        {
+            if (_uptimeLastBootUtc is not { } lastBoot)
+            {
+                return;
+            }
+
+            UptimeDisplay = HardwareInventoryDetailPresenter.FormatUptime(
+                DateTimeOffset.UtcNow - lastBoot);
         }
 
         private void ApplyStaticHardware(HardwareInfo hardware)

@@ -311,6 +311,9 @@ namespace AIGeekTuner
             // safely remain square without affecting startup.
             WindowCornerController.TryApplyRoundedCorners(this);
             base.OnSourceInitialized(e);
+            // M5.2C：补回标准 shell 状态位，任务栏按钮恢复"前台点击最小化 /
+            // 已最小化点击还原"的标准行为。
+            WindowChromeController.ApplyStandardTaskbarBehavior(this);
             _windowChromeHitTestRouter = new WindowChromeHitTestRouter(this, NavigationItems);
             StartupBreadcrumbLogger.Write(
                 _windowChromeHitTestRouter.IsAttached

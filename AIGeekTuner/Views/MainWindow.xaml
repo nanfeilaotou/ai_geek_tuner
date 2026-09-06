@@ -4,6 +4,7 @@
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
         xmlns:diagnostics="clr-namespace:AIGeekTuner.Services.Diagnostics"
         Title="{Binding Title}" Height="760" Width="1180"
+        Icon="pack://application:,,,/AIGeekTuner;component/Assets/AppIcon.ico"
         MinHeight="680" MinWidth="1024"
         WindowStartupLocation="CenterScreen"
         WindowStyle="None"

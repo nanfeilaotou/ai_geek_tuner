@@ -178,6 +178,16 @@ public sealed class WindowChromeHitTestRouter : IDisposable
                 // In particular, main page content must remain HTCLIENT so the
                 // standard WPF mouse-wheel route is preserved.
             }
+            else if (message == WindowMaximizeWorkArea.WmGetMinMaxInfo)
+            {
+                // M5.2C：把最大化 bounds 钳制到所在显示器工作区（不遮任务栏、
+                // 不留白缝）。完全接管该消息，防止 ptMaxSize 被还原成整屏
+                // bounds；NoResize 固定尺寸窗口不依赖 track-size 约束。
+                if (WindowMaximizeWorkArea.HandleGetMinMaxInfo(hwnd, lParam))
+                {
+                    return IntPtr.Zero;
+                }
+            }
             else if (message == WmNcLButtonDblClk
                 && wParam.ToInt32() == HtCaption)
             {
