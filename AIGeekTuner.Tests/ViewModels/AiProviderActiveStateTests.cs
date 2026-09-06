@@ -52,6 +52,30 @@ public class AiProviderActiveStateTests : IDisposable
     }
 
     [Fact]
+    public void FourPersistedProfiles_ShowDeepSeekAsActiveWithoutUsingDraft()
+    {
+        var manager = new FakeAiProviderManager();
+        manager.Profiles.Add(MakeProfile("p1", "Ollama", "http://127.0.0.1:11434",
+            AiProviderKind.OllamaNative, ["ollama-model"], "ollama-model"));
+        manager.Profiles.Add(MakeProfile("p2", "LM Studio", "http://127.0.0.1:1234/v1",
+            AiProviderKind.OpenAiCompatible, ["lm-model"], "lm-model"));
+        manager.Profiles.Add(MakeProfile("p3", "llama.cpp", "http://127.0.0.1:8080/v1",
+            AiProviderKind.OpenAiCompatible, ["llama-model"], "llama-model"));
+        var deepSeek = MakeProfile("p4", "DeepSeek", "https://api.deepseek.com/v1",
+            AiProviderKind.OpenAiCompatible, ["deepseek-chat", "deepseek-reasoner"], "deepseek-chat");
+        manager.Profiles.Add(deepSeek);
+        manager.ActiveOverride = deepSeek;
+
+        var viewModel = new AiProviderSettingsViewModel(manager);
+
+        Assert.Equal(4, viewModel.SelectorItems.Count);
+        Assert.Contains("DeepSeek", viewModel.ActiveProviderDisplay);
+        Assert.Contains("deepseek-chat", viewModel.ActiveProviderDisplay);
+        Assert.False(viewModel.IsEditingProfileActive);
+        Assert.True(viewModel.CanActivateCurrentProfile);
+    }
+
+    [Fact]
     public async Task Activate_WithDirtyDraft_IsRejected_WithoutManagerCall()
     {
         var manager = new FakeAiProviderManager();

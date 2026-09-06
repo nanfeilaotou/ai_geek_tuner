@@ -37,6 +37,82 @@ public sealed class AiProviderConfigurationPortabilityTests : IDisposable
     }
 
     [Fact]
+    public async Task FourProfileCatalogExportAndImportPreservesDeepSeekActiveAndModels()
+    {
+        var profiles = new[]
+        {
+            Profile("p1", "Ollama", AiProviderKind.OllamaNative, "ollama-model"),
+            Profile("p2", "LM Studio", AiProviderKind.OpenAiCompatible, "lm-model"),
+            Profile("p3", "llama.cpp", AiProviderKind.OpenAiCompatible, "llama-model"),
+            new AiProviderProfile
+            {
+                Id = "p4",
+                DisplayName = "DeepSeek",
+                Kind = AiProviderKind.OpenAiCompatible,
+                BaseUrl = "https://api.deepseek.com/v1",
+                Models = [new AiProviderModel("deepseek-chat"), new AiProviderModel("deepseek-reasoner")],
+                DefaultModelId = "deepseek-chat",
+                StructuredOutputMode = AiStructuredOutputMode.OpenAiJsonSchema,
+                Enabled = true
+            }
+        };
+        var exportCredentials = new FakeAiCredentialStore();
+        await exportCredentials.SaveAsync("p4", "sk-deepseek-local-secret");
+        var persisted = new AiProviderConfiguration
+        {
+            Version = 1,
+            Profiles = profiles,
+            ActiveProviderId = "p4"
+        };
+        var exportStore = new ScriptedProviderStore(persisted);
+        var exportService = new AiProviderConfigurationPortabilityService(
+            exportStore,
+            exportCredentials,
+            _temp.Combine("ai-providers.json"));
+        var path = _temp.Combine("AIGeekTuner_AIProviders_v1.json");
+
+        await exportService.ExportAsync(path);
+
+        using (var document = JsonDocument.Parse(await File.ReadAllTextAsync(path)))
+        {
+            var root = document.RootElement;
+            Assert.Equal("p4", root.GetProperty("activeProviderId").GetString());
+            var exportedProfiles = root.GetProperty("profiles");
+            Assert.Equal(4, exportedProfiles.GetArrayLength());
+            Assert.DoesNotContain("sk-deepseek-local-secret", root.GetRawText());
+            Assert.Equal(2, exportedProfiles.EnumerateArray()
+                .Single(profile => profile.GetProperty("id").GetString() == "p4")
+                .GetProperty("models")
+                .GetArrayLength());
+        }
+
+        Assert.Empty(exportCredentials.LoadCalls);
+
+        var importCredentials = new FakeAiCredentialStore();
+        await importCredentials.SaveAsync("p4", "local-p4-secret");
+        var importStore = new ScriptedProviderStore(new AiProviderConfiguration
+        {
+            ActiveProviderId = "p1",
+            Profiles = [profiles[0]]
+        });
+        var importService = new AiProviderConfigurationPortabilityService(
+            importStore,
+            importCredentials,
+            _temp.Combine("imported-ai-providers.json"));
+
+        var result = await importService.ImportAsync(path);
+
+        Assert.Equal("p4", result.ActiveProviderId);
+        Assert.Equal(4, importStore.Snapshot().Profiles.Count);
+        Assert.Equal("p4", importStore.Snapshot().ActiveProviderId);
+        Assert.Equal(
+            ["deepseek-chat", "deepseek-reasoner"],
+            importStore.Snapshot().Profiles.Single(profile => profile.Id == "p4")
+                .Models.Select(model => model.Id));
+        Assert.Equal("local-p4-secret", importCredentials.Secrets["p4"]);
+    }
+
+    [Fact]
     public async Task Import_MergesProfilesPreservesLocalProfilesAndCredentials()
     {
         var credentials = new FakeAiCredentialStore();
@@ -195,6 +271,26 @@ public sealed class AiProviderConfigurationPortabilityTests : IDisposable
         Models = [new AiProviderModel("local-model")],
         DefaultModelId = "local-model",
         StructuredOutputMode = AiStructuredOutputMode.PromptOnly,
+        Enabled = true
+    };
+
+    private static AiProviderProfile Profile(
+        string id,
+        string displayName,
+        AiProviderKind kind,
+        string modelId) => new()
+    {
+        Id = id,
+        DisplayName = displayName,
+        Kind = kind,
+        BaseUrl = kind == AiProviderKind.OllamaNative
+            ? "http://127.0.0.1:11434"
+            : "http://127.0.0.1:1234/v1",
+        Models = [new AiProviderModel(modelId)],
+        DefaultModelId = modelId,
+        StructuredOutputMode = kind == AiProviderKind.OllamaNative
+            ? AiStructuredOutputMode.NativeSchema
+            : AiStructuredOutputMode.OpenAiJsonSchema,
         Enabled = true
     };
 

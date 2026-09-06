@@ -1,13 +1,13 @@
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
-using System.Reflection;
 using System.Text;
 using AIGeekTuner.Models.Incidents;
 using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Models.Telemetry;
 using AIGeekTuner.Services.Incidents;
 using AIGeekTuner.Services.Storage;
+using AIGeekTuner.Services.Diagnostics;
 
 namespace AIGeekTuner.Services.Telemetry.Recording;
 
@@ -500,8 +500,7 @@ AI analysis 与原始 telemetry 是分离层；时间相关性不等于因果关
 
     private static string Table(string? value) => Inline(value).Replace('|', '/');
 
-    private static string ApplicationVersion() =>
-        Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown";
+    private static string ApplicationVersion() => ApplicationVersionInfo.Current;
 
     private sealed record SessionBundle(
         TelemetryRecordingSession Session,

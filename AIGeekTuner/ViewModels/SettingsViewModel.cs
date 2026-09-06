@@ -47,7 +47,8 @@ namespace AIGeekTuner.ViewModels
 
         // V2-M5.1B（Gate N）：旧 Ollama 专属的 BaseUrl / 模型 / 刷新模型 / 测试连接
         // 已从用户可见 UI 移除——由“AI 服务提供方”卡片的 Provider 配置取代。
-        // 旧持久化字段（OllamaBaseUrl / OllamaModelName / UseJsonFormat）保留兼容，保存时原样带回。
+        // 旧持久化字段（OllamaBaseUrl / OllamaModelName / UseJsonFormat）保留兼容，保存时原样带回；
+        // ApplicationSettingsPortabilityService 的 v2 DTO 不再导出这些字段。
         private string _timeoutSecondsText;
         private string _maxLogLengthText;
         private bool _autoSaveDiagnosisHistory;
@@ -291,7 +292,7 @@ namespace AIGeekTuner.ViewModels
             var path = _fileDialogs.PickSaveFile(
                 "导出应用设置",
                 "AIGeekTuner 设置 (*.json)|*.json|JSON 文件 (*.json)|*.json",
-                "AIGeekTuner_Settings_v1.json");
+                "AIGeekTuner_Settings_v2.json");
             if (path is null)
             {
                 return;
@@ -301,7 +302,7 @@ namespace AIGeekTuner.ViewModels
             try
             {
                 await _settingsPortability.ExportAsync(path);
-                SetStatus(SettingsStatusKind.Success, "应用设置已导出；Provider 凭据不包含在此文件中。");
+                SetStatus(SettingsStatusKind.Success, "应用设置已导出；Provider 配置请在下方单独导出。");
             }
             catch (SettingsPortabilityException exception)
             {
@@ -557,7 +558,9 @@ namespace AIGeekTuner.ViewModels
                     SpeedFactor = speedFactor,
                     GptModelPath = previous.Voice.GptModelPath,
                     SovitsModelPath = previous.Voice.SovitsModelPath,
-                }
+                },
+                HardwareAutoRefresh = previous.HardwareAutoRefresh,
+                HardwareRefreshIntervalMs = previous.HardwareRefreshIntervalMs
             };
 
             var errors = ApplicationSettingsValidator.Validate(settings);

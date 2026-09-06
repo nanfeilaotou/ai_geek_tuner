@@ -1,8 +1,8 @@
 using System.IO;
-using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using AIGeekTuner.Services.AI.Providers.Credentials;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.Storage;
 
 namespace AIGeekTuner.Services.AI.Providers.Configuration;
@@ -67,7 +67,7 @@ public sealed class AiProviderConfigurationPortabilityService
             var document = new AiProviderExportDocument(
                 CurrentSchemaVersion,
                 DateTimeOffset.UtcNow,
-                ApplicationVersion(),
+                ApplicationVersionInfo.Current,
                 CredentialsIncluded: false,
                 snapshot.ActiveProviderId,
                 snapshot.Profiles.Select(Normalize).ToArray());
@@ -320,6 +320,4 @@ public sealed class AiProviderConfigurationPortabilityService
         model.Id ?? string.Empty,
         model.DisplayName);
 
-    private static string ApplicationVersion() =>
-        Assembly.GetEntryAssembly()?.GetName().Version?.ToString() ?? "unknown";
 }

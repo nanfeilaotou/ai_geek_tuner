@@ -37,7 +37,7 @@ public sealed class WindowChromeTests
         Assert.Contains("x:Name=\"MinimizeButton\"", xaml);
         Assert.Contains("x:Name=\"MaximizeButton\"", xaml);
         Assert.Contains("x:Name=\"CloseButton\"", xaml);
-        Assert.DoesNotContain("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", xaml);
+        Assert.Contains("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", xaml);
         Assert.Contains("WindowChromeHitTestRouter", File.ReadAllText(FindRepositoryFile(
             Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs"))));
         Assert.DoesNotContain("WindowDragRegion.IsDragRegion=\"True\"", xaml);
@@ -201,7 +201,7 @@ public sealed class WindowChromeTests
     }
 
     [Fact]
-    public void NativeHitTestRouter_MapsBackgroundToCaptionAndControlsToClient()
+    public void NativeHitTestRouter_LeavesClientContentAsClient()
     {
         Exception? failure = null;
         var thread = new Thread(() =>
@@ -215,7 +215,7 @@ public sealed class WindowChromeTests
                 root.Children.Add(button);
 
                 Assert.Equal(
-                    WindowChromeHitTestRouter.HtCaption,
+                    WindowChromeHitTestRouter.HtClient,
                     WindowChromeHitTestRouter.Classify(background, root).ToInt32());
                 Assert.Equal(
                     WindowChromeHitTestRouter.HtClient,
@@ -239,6 +239,8 @@ public sealed class WindowChromeTests
         var router = File.ReadAllText(FindRepositoryFile(
             Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs")));
         Assert.Contains("message == WmNcHitTest", router);
+        Assert.Contains("Let WPF WindowChrome own", router);
+        Assert.DoesNotContain("TryClassifyNativePoint", router);
         Assert.DoesNotContain("WM_SIZE", router);
         Assert.DoesNotContain("WM_DPICHANGED", router);
         Assert.DoesNotContain("DragMove", router);
@@ -437,10 +439,39 @@ public sealed class WindowChromeTests
         var code = File.ReadAllText(FindRepositoryFile(
             Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml.cs")));
 
-        Assert.DoesNotContain("PreviewMouseLeftButtonDown", xaml);
+        Assert.Contains("PreviewMouseLeftButtonDown=\"Window_PreviewMouseLeftButtonDown\"", xaml);
+        Assert.Contains("WindowDragHitTest.IsDraggableFrom", code);
+        Assert.Contains("BeginNativeWindowMove", code);
         Assert.DoesNotContain("DragMove", code);
         Assert.Contains("OnSourceInitialized", code);
         Assert.Contains("WindowChromeHitTestRouter", code);
+    }
+
+    [Fact]
+    public void NativeMoveGesture_ReleasesCaptureAndSendsCaptionDown()
+    {
+        var router = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs")));
+
+        Assert.Contains("ReleaseCapture();", router);
+        Assert.Contains("SendMessage(hwnd, WmNcLButtonDown", router);
+        Assert.Contains("new IntPtr(HtCaption)", router);
+        Assert.DoesNotContain("DragMove", router);
+    }
+
+    [Fact]
+    public void MainWindow_DoesNotInstallMouseWheelForwardingHack()
+    {
+        var xaml = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml")));
+        var code = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml.cs")));
+        var router = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs")));
+
+        Assert.DoesNotContain("PreviewMouseWheel", xaml);
+        Assert.DoesNotContain("PreviewMouseWheel", code);
+        Assert.DoesNotContain("PreviewMouseWheel", router);
     }
 
     [Fact]

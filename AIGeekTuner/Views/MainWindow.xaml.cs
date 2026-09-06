@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AIGeekTuner.Views.Behaviors;
 using AIGeekTuner.Configuration;
 using AIGeekTuner.Models;
@@ -286,6 +287,22 @@ namespace AIGeekTuner
 
         private void CloseButton_Click(object sender, RoutedEventArgs e) =>
             WindowChromeController.Close(this);
+
+        private void Window_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (e.Handled
+                || e.ChangedButton != MouseButton.Left
+                || e.OriginalSource is not DependencyObject source
+                || !WindowDragHitTest.IsDraggableFrom(source, this))
+            {
+                return;
+            }
+
+            if (WindowChromeHitTestRouter.BeginNativeWindowMove(this))
+            {
+                e.Handled = true;
+            }
+        }
 
         protected override void OnSourceInitialized(EventArgs e)
         {

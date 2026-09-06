@@ -17,6 +17,7 @@ namespace AIGeekTuner.Views.Behaviors;
 public sealed class WindowChromeHitTestRouter : IDisposable
 {
     public const int WmNcHitTest = 0x0084;
+    public const int WmNcLButtonDown = 0x00A1;
     public const int WmNcLButtonDblClk = 0x00A3;
     public const int WmNcDestroy = 0x0082;
     public const int WmEnterSizeMove = 0x0231;
@@ -75,17 +76,34 @@ public sealed class WindowChromeHitTestRouter : IDisposable
         GC.KeepAlive(_subclassProc);
     }
 
-    /// <summary>Maps the already classified WPF hit to the native result.</summary>
-    public static IntPtr Classify(DependencyObject? originalSource, DependencyObject dragRoot) =>
-        WindowDragHitTest.IsDraggableFrom(originalSource, dragRoot)
-            ? new IntPtr(HtCaption)
-            : new IntPtr(HtClient);
+    /// <summary>
+    /// Client-content hit tests must stay client-side. Background dragging is a
+    /// mouse-down gesture, not a permanent native caption classification.
+    /// </summary>
+    public static IntPtr Classify(DependencyObject? originalSource, DependencyObject dragRoot)
+    {
+        ArgumentNullException.ThrowIfNull(dragRoot);
+        return new IntPtr(HtClient);
+    }
 
-    /// <summary>Converts a native screen coordinate to WPF device-independent units.</summary>
-    public static Point ScreenPixelsToDip(Window window, Point screenPixels)
+    /// <summary>
+    /// Starts one native window move after WPF has classified the mouse-down as
+    /// a draggable background gesture. This deliberately uses the native move
+    /// message instead of the WPF modal drag helper.
+    /// </summary>
+    public static bool BeginNativeWindowMove(Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
-        return window.PointFromScreen(screenPixels);
+
+        var hwnd = new WindowInteropHelper(window).Handle;
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        ReleaseCapture();
+        SendMessage(hwnd, WmNcLButtonDown, new IntPtr(HtCaption), IntPtr.Zero);
+        return true;
     }
 
     private void Attach()
@@ -154,14 +172,14 @@ public sealed class WindowChromeHitTestRouter : IDisposable
                 UpdateSidebarMoveHoverFromCursor(begin: false);
                 ScheduleMoveEndSynchronization();
             }
-            else if (message == WmNcHitTest
-                && TryClassifyNativePoint(lParam, out var result))
+            else if (message == WmNcHitTest)
             {
-                return result;
+                // Let WPF WindowChrome own the real caption/titlebar hit-test.
+                // In particular, main page content must remain HTCLIENT so the
+                // standard WPF mouse-wheel route is preserved.
             }
             else if (message == WmNcLButtonDblClk
-                && TryClassifyNativePoint(lParam, out var doubleClickResult)
-                && doubleClickResult == new IntPtr(HtCaption))
+                && wParam.ToInt32() == HtCaption)
             {
                 WindowChromeController.ToggleMaximize(_window);
                 return IntPtr.Zero;
@@ -243,52 +261,6 @@ public sealed class WindowChromeHitTestRouter : IDisposable
             new Action(() => WindowMoveState.SetIsMoving(_window, value)));
     }
 
-    private bool TryClassifyNativePoint(IntPtr lParam, out IntPtr result)
-    {
-        result = IntPtr.Zero;
-        if (_disposed)
-        {
-            return false;
-        }
-
-        var value = lParam.ToInt64();
-        var screenPixels = new Point(
-            unchecked((short)(value & 0xFFFF)),
-            unchecked((short)((value >> 16) & 0xFFFF)));
-
-        Point dip;
-        try
-        {
-            dip = ScreenPixelsToDip(_window, screenPixels);
-        }
-        catch (InvalidOperationException)
-        {
-            return false;
-        }
-
-        var width = _window.ActualWidth > 0 ? _window.ActualWidth : _window.Width;
-        var height = _window.ActualHeight > 0 ? _window.ActualHeight : _window.Height;
-        if (width <= 0 || height <= 0 || !new Rect(0, 0, width, height).Contains(dip))
-        {
-            return false;
-        }
-
-        DependencyObject? hit = null;
-        try
-        {
-            hit = _window.InputHitTest(dip) as DependencyObject;
-        }
-        catch (InvalidOperationException)
-        {
-            // Layout may still be materializing during the first native hit test.
-        }
-
-        result = hit is null
-            ? new IntPtr(HtCaption)
-            : Classify(hit, _window);
-        return true;
-    }
-
     private delegate IntPtr SubclassProc(
         IntPtr hwnd,
         uint message,
@@ -319,6 +291,17 @@ public sealed class WindowChromeHitTestRouter : IDisposable
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GetCursorPos(out NativePoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReleaseCapture();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SendMessage(
+        IntPtr hwnd,
+        int message,
+        IntPtr wParam,
+        IntPtr lParam);
 
     [DllImport("comctl32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

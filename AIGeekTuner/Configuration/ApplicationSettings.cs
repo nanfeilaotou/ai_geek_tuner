@@ -12,6 +12,11 @@ namespace AIGeekTuner.Configuration
 
         public string OllamaModelName { get; init; } = OllamaOptions.DefaultModelName;
 
+        /// <summary>
+        /// Global AI request timeout. The property name is retained in the
+        /// runtime persistence schema for migration; portable v2 calls it
+        /// aiTimeoutSeconds.
+        /// </summary>
         public int OllamaTimeoutSeconds { get; init; } = OllamaOptions.DefaultTimeoutSeconds;
 
         public int MaxFaultLogCharacters { get; init; } =

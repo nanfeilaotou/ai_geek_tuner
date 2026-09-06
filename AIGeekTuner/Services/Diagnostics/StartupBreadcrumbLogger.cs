@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using AIGeekTuner.Services.Storage;
 
@@ -49,8 +48,7 @@ public static class StartupBreadcrumbLogger
             var path = Path.Combine(
                 logsDirectory,
                 $"startup-{DateTime.UtcNow.ToString("yyyyMMdd", CultureInfo.InvariantCulture)}.log");
-            var version = Assembly.GetEntryAssembly()?.GetName().Version?.ToString()
-                ?? "unknown";
+            var version = ApplicationVersionInfo.Current;
             var line = string.Create(
                 CultureInfo.InvariantCulture,
                 $"{DateTime.UtcNow:O} | {Environment.ProcessId} | {version} | {stage.Trim()}{Environment.NewLine}");
