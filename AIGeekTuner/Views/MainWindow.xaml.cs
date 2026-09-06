@@ -340,7 +340,30 @@ namespace AIGeekTuner
                 Height = _normalHeight;
             }
 
+            // M5.2D：SingleBorderWindow 最大化时窗口 rect 被系统外扩一个隐藏
+            // frame；按实测 frame 宽度把根布局推回工作区，Normal 恢复零边距。
+            UpdateMaximizedFrameMargin();
             UpdateCaptionGlyphs();
+        }
+
+        private void UpdateMaximizedFrameMargin()
+        {
+            if (Content is not Grid root)
+            {
+                return;
+            }
+
+            if (WindowState == WindowState.Maximized
+                && WindowMaximizeWorkArea.TryGetMaximizedFrameMargin(
+                    new System.Windows.Interop.WindowInteropHelper(this).Handle,
+                    out var margin))
+            {
+                root.Margin = margin;
+            }
+            else
+            {
+                root.Margin = default(System.Windows.Thickness);
+            }
         }
 
         private void UpdateCaptionGlyphs()

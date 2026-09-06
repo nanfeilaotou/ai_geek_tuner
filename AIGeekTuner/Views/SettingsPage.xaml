@@ -217,7 +217,9 @@
     </Page.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto"
-                  HorizontalScrollBarVisibility="Disabled">
+                  HorizontalScrollBarVisibility="Disabled"
+                  LostKeyboardFocus="SettingsInput_LostKeyboardFocus"
+                  PreviewKeyDown="SettingsInput_PreviewKeyDown">
         <Grid Margin="28,24,28,28">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
@@ -231,7 +233,7 @@
 
             <StackPanel Grid.Row="0" Margin="0,0,0,20">
                 <TextBlock Text="设置" Style="{StaticResource PageTitleStyle}"/>
-                <TextBlock Text="配置 AI 服务提供方与诊断参数，保存后下一次诊断立即生效"
+                <TextBlock Text="配置 AI 服务提供方与诊断参数；更改自动保存，下一次诊断立即生效"
                            Style="{StaticResource PageSubtitleStyle}"/>
             </StackPanel>
 
@@ -832,19 +834,12 @@
                 </StackPanel>
             </Border>
 
-            <!-- 底部保存区 -->
+            <!-- 底部状态区（M5.2H：全局保存按钮已移除——普通设置自动保存；
+                 AI Provider 仍为草稿 + 显式保存。） -->
             <Grid Grid.Row="6" Margin="0,18,0,0">
-                <!-- V2-M5.1B（Gate N）：保存状态展示从已移除的旧 Ollama 卡片迁移到这里。 -->
                 <TextBlock Text="{Binding StatusMessage}"
                            Style="{StaticResource StatusTextStyle}"
-                           HorizontalAlignment="Left" VerticalAlignment="Center"
-                           Margin="0,0,150,0"/>
-                <Button Content="保存设置"
-                        Command="{Binding SaveCommand}"
-                        Style="{StaticResource TechButtonStyle}"
-                        HorizontalAlignment="Right"
-                        Padding="28,10" MinWidth="140" MinHeight="40"
-                        FontWeight="Bold" FontSize="14"/>
+                           HorizontalAlignment="Left" VerticalAlignment="Center"/>
             </Grid>
         </Grid>
     </ScrollViewer>

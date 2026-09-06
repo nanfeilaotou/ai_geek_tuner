@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Windows.Threading;
 using System.Windows.Input;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
@@ -39,7 +40,6 @@ namespace AIGeekTuner.ViewModels
 
         private string _dataSourceStatusLine = "正在检测硬件数据源...";
 
-        private readonly AsyncRelayCommand _saveCommand;
         private readonly AsyncRelayCommand _exportSettingsCommand;
         private readonly AsyncRelayCommand _importSettingsCommand;
         private readonly AsyncRelayCommand _exportProvidersCommand;
@@ -52,10 +52,17 @@ namespace AIGeekTuner.ViewModels
         private string _timeoutSecondsText;
         private string _maxLogLengthText;
         private bool _autoSaveDiagnosisHistory;
+        private int _recordingIntervalMs;
+        private bool _voiceEnabled;
+        private string _voiceEndpoint = string.Empty;
+        private string _voiceReferenceAudioPath = string.Empty;
+        private string _voicePromptText = string.Empty;
+        private string _voicePromptLang = "ja";
+        private string _voiceSpeedFactorText = "1.0";
 
         private bool _isSaving;
 
-        private string _statusMessage = "更改完成后点击“保存设置”。连接检测与保存互不影响。";
+        private string _statusMessage = "更改会自动保存并立即生效；AI Provider 配置单独保存。";
         private SettingsStatusKind _statusKind = SettingsStatusKind.Info;
 
         public SettingsViewModel(
@@ -82,19 +89,27 @@ namespace AIGeekTuner.ViewModels
             Providers = providers ?? AiProviderSettingsViewModel.CreateUnavailable();
 
             var current = settingsService.Current;
-            _timeoutSecondsText = current.OllamaTimeoutSeconds.ToString();
-            _maxLogLengthText = current.MaxFaultLogCharacters.ToString("N0");
-            _autoSaveDiagnosisHistory = current.AutoSaveDiagnosisHistory;
-            RecordingIntervalMs = current.RecordingIntervalMs;
-            VoiceEnabled = current.Voice.Enabled;
-            VoiceEndpoint = current.Voice.Endpoint;
-            VoiceReferenceAudioPath = current.Voice.ReferenceAudioPath;
-            VoicePromptText = current.Voice.PromptText;
-            VoicePromptLang = current.Voice.PromptLang;
-            VoiceSpeedFactorText = current.Voice.SpeedFactor.ToString(
-                "0.0##", System.Globalization.CultureInfo.InvariantCulture);
+            // 构造期草稿回填不是用户变更：不置脏，不触发启动自动保存。
+            _suppressAutoSave = true;
+            try
+            {
+                _timeoutSecondsText = current.OllamaTimeoutSeconds.ToString();
+                _maxLogLengthText = current.MaxFaultLogCharacters.ToString("N0");
+                _autoSaveDiagnosisHistory = current.AutoSaveDiagnosisHistory;
+                _recordingIntervalMs = current.RecordingIntervalMs;
+                _voiceEnabled = current.Voice.Enabled;
+                _voiceEndpoint = current.Voice.Endpoint;
+                _voiceReferenceAudioPath = current.Voice.ReferenceAudioPath;
+                _voicePromptText = current.Voice.PromptText;
+                _voicePromptLang = current.Voice.PromptLang;
+                _voiceSpeedFactorText = current.Voice.SpeedFactor.ToString(
+                    "0.0##", System.Globalization.CultureInfo.InvariantCulture);
+            }
+            finally
+            {
+                _suppressAutoSave = false;
+            }
 
-            _saveCommand = new AsyncRelayCommand(SaveAsync, () => !IsSaving);
             _exportSettingsCommand = new AsyncRelayCommand(ExportSettingsAsync, () => !IsSaving);
             _importSettingsCommand = new AsyncRelayCommand(ImportSettingsAsync, () => !IsSaving);
             _exportProvidersCommand = new AsyncRelayCommand(ExportProvidersAsync, () => !IsSaving);
@@ -174,37 +189,71 @@ namespace AIGeekTuner.ViewModels
             }
         }
 
+        // ---- 普通设置草稿：全部接入自动保存（M5.2G）----
+        // 文本/数字输入：按键去抖（约 400ms）+ 失焦/Enter 立即提交；
+        // 开关与下拉：变更立即提交。非法值保持草稿，不覆盖已持久化有效值。
         public string TimeoutSecondsText
         {
             get => _timeoutSecondsText;
-            set => SetProperty(ref _timeoutSecondsText, value);
+            set { if (SetProperty(ref _timeoutSecondsText, value)) QueueAutoSave(); }
         }
 
         public string MaxLogLengthText
         {
             get => _maxLogLengthText;
-            set => SetProperty(ref _maxLogLengthText, value);
+            set { if (SetProperty(ref _maxLogLengthText, value)) QueueAutoSave(); }
         }
 
         public bool AutoSaveDiagnosisHistory
         {
             get => _autoSaveDiagnosisHistory;
-            set => SetProperty(ref _autoSaveDiagnosisHistory, value);
+            set { if (SetProperty(ref _autoSaveDiagnosisHistory, value)) CommitAutoSaveImmediately(); }
         }
 
         /// <summary>诊断录制采样间隔（毫秒）；合法值 1000/2000/5000。</summary>
-        public int RecordingIntervalMs { get; set; }
+        public int RecordingIntervalMs
+        {
+            get => _recordingIntervalMs;
+            set { if (SetProperty(ref _recordingIntervalMs, value)) CommitAutoSaveImmediately(); }
+        }
 
-        public bool VoiceEnabled { get; set; }
-        public string VoiceEndpoint { get; set; } = string.Empty;
-        public string VoiceReferenceAudioPath { get; set; } = string.Empty;
-        public string VoicePromptText { get; set; } = string.Empty;
+        public bool VoiceEnabled
+        {
+            get => _voiceEnabled;
+            set { if (SetProperty(ref _voiceEnabled, value)) CommitAutoSaveImmediately(); }
+        }
+
+        public string VoiceEndpoint
+        {
+            get => _voiceEndpoint;
+            set { if (SetProperty(ref _voiceEndpoint, value)) QueueAutoSave(); }
+        }
+
+        public string VoiceReferenceAudioPath
+        {
+            get => _voiceReferenceAudioPath;
+            set { if (SetProperty(ref _voiceReferenceAudioPath, value)) QueueAutoSave(); }
+        }
+
+        public string VoicePromptText
+        {
+            get => _voicePromptText;
+            set { if (SetProperty(ref _voicePromptText, value)) QueueAutoSave(); }
+        }
 
         /// <summary>V2-M3.1：参考音频语言（zh / ja / en，范围由 Validator 权威定义）。</summary>
-        public string VoicePromptLang { get; set; } = "ja";
+        public string VoicePromptLang
+        {
+            get => _voicePromptLang;
+            set { if (SetProperty(ref _voicePromptLang, value)) CommitAutoSaveImmediately(); }
+        }
 
         /// <summary>语速文本（0.7–1.3），保存时统一解析与校验。</summary>
-        public string VoiceSpeedFactorText { get; set; } = "1.0";
+        public string VoiceSpeedFactorText
+        {
+            get => _voiceSpeedFactorText;
+            set { if (SetProperty(ref _voiceSpeedFactorText, value)) QueueAutoSave(); }
+        }
 
         public string LocalDataDirectory => _localDataDirectoryService.DirectoryPath;
 
@@ -215,7 +264,6 @@ namespace AIGeekTuner.ViewModels
             {
                 if (SetProperty(ref _isSaving, value))
                 {
-                    _saveCommand.NotifyCanExecuteChanged();
                     _exportSettingsCommand.NotifyCanExecuteChanged();
                     _importSettingsCommand.NotifyCanExecuteChanged();
                     _exportProvidersCommand.NotifyCanExecuteChanged();
@@ -236,8 +284,6 @@ namespace AIGeekTuner.ViewModels
             private set => SetProperty(ref _statusKind, value);
         }
 
-        public AsyncRelayCommand SaveCommand => _saveCommand;
-
         public AsyncRelayCommand ExportSettingsCommand => _exportSettingsCommand;
 
         public AsyncRelayCommand ImportSettingsCommand => _importSettingsCommand;
@@ -248,15 +294,99 @@ namespace AIGeekTuner.ViewModels
 
         public RelayCommand OpenDataDirectoryCommand { get; }
 
-        private async Task SaveAsync()
+        // ---- M5.2G：自动保存 ----
+        // 普通设置变化 → 校验 → 原子写盘 → 换入运行时快照。
+        // 文本输入经约 400ms 去抖合并写入；开关/下拉立即提交；
+        // 失焦 / Enter 立即提交。串行化在 _autoSaveChain 上，写入永不并发。
+        private const int AutoSaveDebounceMilliseconds = 400;
+
+        private DispatcherTimer? _autoSaveDebounceTimer;
+        private Task _autoSaveChain = Task.CompletedTask;
+        private bool _autoSaveDirty;
+        private bool _suppressAutoSave;
+
+        /// <summary>标记有未保存更改，并重启去抖计时（快速连续输入合并为一次写盘）。</summary>
+        private void QueueAutoSave()
         {
-            if (!TryBuildSettingsFromDrafts(out var settings, out var validationMessage))
+            if (_suppressAutoSave)
             {
-                SetStatus(SettingsStatusKind.Warning, validationMessage!);
                 return;
             }
 
-            IsSaving = true;
+            _autoSaveDirty = true;
+            var timer = _autoSaveDebounceTimer;
+            if (timer is null)
+            {
+                timer = new DispatcherTimer(DispatcherPriority.Background)
+                {
+                    Interval = TimeSpan.FromMilliseconds(AutoSaveDebounceMilliseconds)
+                };
+                timer.Tick += (_, _) => _ = CommitAutoSaveAsync();
+                _autoSaveDebounceTimer = timer;
+            }
+            else
+            {
+                timer.Stop();
+            }
+
+            timer.Start();
+        }
+
+        /// <summary>开关/下拉类变更：跳过去抖立即提交。</summary>
+        private void CommitAutoSaveImmediately()
+        {
+            if (_suppressAutoSave)
+            {
+                return;
+            }
+
+            _autoSaveDirty = true;
+            _ = CommitAutoSaveAsync();
+        }
+
+        /// <summary>
+        /// 立即尝试提交当前草稿（失焦 / Enter / 去抖到期共用）。
+        /// 无未保存更改时返回当前链尾；否则把本次提交串到链尾。
+        /// </summary>
+        public Task CommitAutoSaveAsync()
+        {
+            _autoSaveDebounceTimer?.Stop();
+            if (!_autoSaveDirty)
+            {
+                return _autoSaveChain;
+            }
+
+            _autoSaveDirty = false;
+            var previous = _autoSaveChain;
+            _autoSaveChain = RunAutoSaveChainedAsync(previous);
+            return _autoSaveChain;
+        }
+
+        private async Task RunAutoSaveChainedAsync(Task previous)
+        {
+            try
+            {
+                await previous.ConfigureAwait(false);
+            }
+            catch
+            {
+                // 上一轮失败已经体现在状态条；本轮继续按当前草稿尝试。
+            }
+
+            await RunAutoSaveCoreAsync().ConfigureAwait(false);
+        }
+
+        private async Task RunAutoSaveCoreAsync()
+        {
+            if (!TryBuildSettingsFromDrafts(out var settings, out var validationMessage))
+            {
+                // 非法草稿：保持错误状态，绝不覆盖最后有效的持久化值。
+                SetStatus(
+                    SettingsStatusKind.Warning,
+                    "自动保存已暂停：" + validationMessage + "（最后有效设置保持不变）");
+                return;
+            }
+
             try
             {
                 // 先写盘（服务内部再次权威校验），成功后才换入运行时快照。
@@ -264,20 +394,16 @@ namespace AIGeekTuner.ViewModels
                 await _settingsService.SaveAsync(settings);
                 ReplaceRuntimeConfiguration(settings);
 
-                SetStatus(SettingsStatusKind.Success, "设置已保存，下一次诊断立即生效。");
+                SetStatus(SettingsStatusKind.Success, "已自动保存，下一次诊断立即生效。");
             }
             catch (ApplicationSettingsException exception)
             {
-                SetStatus(SettingsStatusKind.Error, exception.Message);
+                SetStatus(SettingsStatusKind.Error, "保存失败：" + exception.Message);
             }
             catch (Exception exception)
             {
-                ExceptionLogWriter.Write(exception, "SettingsViewModel.SaveAsync");
-                SetStatus(SettingsStatusKind.Error, "设置保存失败，请稍后重试。");
-            }
-            finally
-            {
-                IsSaving = false;
+                ExceptionLogWriter.Write(exception, "SettingsViewModel.AutoSave");
+                SetStatus(SettingsStatusKind.Error, "设置自动保存失败，请稍后重试。");
             }
         }
 
@@ -459,6 +585,10 @@ namespace AIGeekTuner.ViewModels
 
         private void ApplySettingsToDraft(ApplicationSettings settings)
         {
+            // 导入路径显式保存；草稿回填期间不得触发自动保存。
+            _suppressAutoSave = true;
+            try
+            {
             _timeoutSecondsText = settings.OllamaTimeoutSeconds.ToString();
             _maxLogLengthText = settings.MaxFaultLogCharacters.ToString("N0");
             _autoSaveDiagnosisHistory = settings.AutoSaveDiagnosisHistory;
@@ -481,6 +611,11 @@ namespace AIGeekTuner.ViewModels
             OnPropertyChanged(nameof(VoicePromptText));
             OnPropertyChanged(nameof(VoicePromptLang));
             OnPropertyChanged(nameof(VoiceSpeedFactorText));
+            }
+            finally
+            {
+                _suppressAutoSave = false;
+            }
         }
 
         private void ReplaceRuntimeConfiguration(ApplicationSettings settings) =>

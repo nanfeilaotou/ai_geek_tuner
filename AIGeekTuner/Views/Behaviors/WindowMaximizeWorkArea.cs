@@ -1,5 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Windows;
+using System.Windows.Interop;
 
 namespace AIGeekTuner.Views.Behaviors;
 
@@ -70,6 +72,69 @@ public static class WindowMaximizeWorkArea
             Y = workArea.Top - monitorBounds.Top
         };
     }
+
+    /// <summary>
+    /// M5.2D：SingleBorderWindow 下，Windows 最大化会把窗口 rect 向四边外扩
+    /// 一个隐藏 frame（hang-off），而 WindowChrome 让 client = 整个窗口 rect，
+    /// 内容因此比工作区四周多出 frame 宽度。返回需要补在根布局上的 WPF
+    /// Margin（正值，把内容推回工作区）；窗口未被外扩时返回 false / 零边距。
+    /// frame 宽度按当前显示器实测，不硬编码。
+    /// </summary>
+    public static bool TryGetMaximizedFrameMargin(IntPtr hwnd, out Thickness margin)
+    {
+        margin = default;
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (!GetWindowRect(hwnd, out var windowRect))
+        {
+            return false;
+        }
+
+        var hMonitor = MonitorFromWindow(hwnd, MonitorDefaultToNearest);
+        if (hMonitor == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var monitorInfo = MonitorInfo.Create();
+        if (!GetMonitorInfoW(hMonitor, ref monitorInfo))
+        {
+            return false;
+        }
+
+        var source = HwndSource.FromHwnd(hwnd);
+        var transform = source?.CompositionTarget.TransformToDevice;
+        var dpiX = transform?.M11 ?? 1.0;
+        var dpiY = transform?.M22 ?? 1.0;
+        if (dpiX <= 0 || dpiY <= 0)
+        {
+            return false;
+        }
+
+        margin = FrameMargin(windowRect, monitorInfo.RcWork, dpiX, dpiY);
+        return margin.Left > 0 || margin.Top > 0 || margin.Right > 0 || margin.Bottom > 0;
+    }
+
+    /// <summary>纯计算：最大化窗口 rect 与工作区的差值（物理像素）换算为 DIP margin。</summary>
+    internal static Thickness FrameMargin(
+        NativeRect windowRect,
+        NativeRect workArea,
+        double dpiX,
+        double dpiY)
+    {
+        var left = Math.Max(0, workArea.Left - windowRect.Left);
+        var top = Math.Max(0, workArea.Top - windowRect.Top);
+        var right = Math.Max(0, windowRect.Right - workArea.Right);
+        var bottom = Math.Max(0, windowRect.Bottom - workArea.Bottom);
+        return new Thickness(left / dpiX, top / dpiY, right / dpiX, bottom / dpiY);
+    }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetWindowRect(IntPtr hwnd, out NativeRect rect);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct NativePoint

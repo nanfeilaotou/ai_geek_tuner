@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using AIGeekTuner.ViewModels;
 
 namespace AIGeekTuner.Views
@@ -115,6 +116,25 @@ namespace AIGeekTuner.Views
                 && int.TryParse(item.Tag?.ToString(), out var interval))
             {
                 viewModel.RecordingIntervalMs = interval;
+            }
+        }
+
+        // M5.2G：文本/数字草稿在失焦时立即尝试提交（合法 → 自动保存；
+        // 非法 → 保持草稿与错误状态，不覆盖最后有效值）。
+        private void SettingsInput_LostKeyboardFocus(
+            object sender, KeyboardFocusChangedEventArgs e)
+        {
+            if (sender is TextBox)
+            {
+                _ = (DataContext as SettingsViewModel)?.CommitAutoSaveAsync();
+            }
+        }
+
+        private void SettingsInput_PreviewKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Enter && sender is TextBox)
+            {
+                _ = (DataContext as SettingsViewModel)?.CommitAutoSaveAsync();
             }
         }
     }

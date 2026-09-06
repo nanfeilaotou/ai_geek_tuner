@@ -27,7 +27,7 @@ public sealed class WindowChromeTests
         var xaml = File.ReadAllText(FindRepositoryFile(
             Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml")));
 
-        Assert.Contains("WindowStyle=\"None\"", xaml);
+        Assert.Contains("WindowStyle=\"SingleBorderWindow\"", xaml);
         Assert.Contains("ResizeMode=\"NoResize\"", xaml);
         Assert.Contains("shell:WindowChrome.WindowChrome", xaml);
         Assert.Contains("ResizeBorderThickness=\"0\"", xaml);
@@ -41,7 +41,7 @@ public sealed class WindowChromeTests
         Assert.Contains("WindowChromeHitTestRouter", File.ReadAllText(FindRepositoryFile(
             Path.Combine("AIGeekTuner", "Views", "Behaviors", "WindowChromeHitTestRouter.cs"))));
         Assert.DoesNotContain("WindowDragRegion.IsDragRegion=\"True\"", xaml);
-        Assert.DoesNotContain("WindowStyle=\"SingleBorderWindow\"", xaml);
+        Assert.DoesNotContain("WindowStyle=\"None\"", xaml);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public sealed class WindowChromeTests
             {
                 EnsureThemeResources();
                 var window = new MainWindow();
-                Assert.Equal(WindowStyle.None, window.WindowStyle);
+                Assert.Equal(WindowStyle.SingleBorderWindow, window.WindowStyle);
                 Assert.Equal(ResizeMode.NoResize, window.ResizeMode);
                 Assert.Equal(1024, window.MinWidth);
                 Assert.Equal(680, window.MinHeight);

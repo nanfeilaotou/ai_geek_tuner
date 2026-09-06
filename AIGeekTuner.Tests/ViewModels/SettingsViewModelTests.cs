@@ -9,7 +9,7 @@ namespace AIGeekTuner.Tests.ViewModels;
 
 /// <summary>
 /// SettingsViewModel 关键逻辑（V2-M5.1B 后）：草稿加载、保存校验与快照替换、
-/// 旧 Ollama 字段的数据兼容（UI 已移除但持久化保留）、保存期重入保护。
+/// 旧 Ollama 字段的数据兼容（UI 已移除但持久化保留）、自动保存串行化（M5.2G）。
 /// </summary>
 public class SettingsViewModelTests : IDisposable
 {
@@ -44,7 +44,7 @@ public class SettingsViewModelTests : IDisposable
         viewModel.TimeoutSecondsText = "600";
         viewModel.MaxLogLengthText = "8000";
 
-        await viewModel.SaveCommand.ExecuteAsync();
+        await viewModel.CommitAutoSaveAsync();
 
         var saved = Assert.Single(_settingsService.SavedValues);
         Assert.Equal(600, saved.OllamaTimeoutSeconds);
@@ -65,8 +65,9 @@ public class SettingsViewModelTests : IDisposable
             UseJsonFormat = false
         });
         var viewModel = CreateViewModel();
+        viewModel.TimeoutSecondsText = "600";
 
-        await viewModel.SaveCommand.ExecuteAsync();
+        await viewModel.CommitAutoSaveAsync();
 
         var saved = Assert.Single(_settingsService.SavedValues);
         Assert.Equal("http://192.168.1.50:11434", saved.OllamaBaseUrl);
@@ -83,35 +84,33 @@ public class SettingsViewModelTests : IDisposable
         var viewModel = CreateViewModel();
         viewModel.TimeoutSecondsText = "abc";
 
-        await viewModel.SaveCommand.ExecuteAsync();
+        await viewModel.CommitAutoSaveAsync();
 
         Assert.Contains("整数", viewModel.StatusMessage);
         Assert.Empty(_settingsService.SavedValues);
     }
     [Fact]
-    public async Task Save_WhileSaving_IgnoresSecondInvocation()
+    public async Task AutoSave_ChangesDuringInFlightSave_AreSerializedByChain()
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         _settingsService.GateSave = gate;
         var viewModel = CreateViewModel();
 
-        var first = viewModel.SaveCommand.ExecuteAsync();
+        viewModel.TimeoutSecondsText = "600";
+        var first = viewModel.CommitAutoSaveAsync();
 
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (!viewModel.IsSaving && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(10);
-        }
-        Assert.True(viewModel.IsSaving);
-
-        // 保存进行中：第二次触发应因 CanExecute=false 直接被忽略。
-        await viewModel.SaveCommand.ExecuteAsync();
+        // 保存进行中再变更草稿：链式排队，绝不并发写盘。
+        viewModel.TimeoutSecondsText = "900";
+        var second = viewModel.CommitAutoSaveAsync();
 
         gate.TrySetResult();
         await first;
+        await second;
 
-        Assert.Single(_settingsService.SavedValues);
-        Assert.False(viewModel.IsSaving);
+        Assert.Equal(2, _settingsService.SavedValues.Count);
+        Assert.Equal(600, _settingsService.SavedValues[0].OllamaTimeoutSeconds);
+        Assert.Equal(900, _settingsService.SavedValues[1].OllamaTimeoutSeconds);
+        Assert.Equal(900, _settingsService.Current.OllamaTimeoutSeconds);
     }
 
     private SettingsViewModel CreateViewModel() =>

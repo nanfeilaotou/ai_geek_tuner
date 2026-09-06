@@ -107,19 +107,42 @@ public sealed class WindowShellBehaviorTests
     // ---- 源码契约：最大化状态不得保留无效外圈补偿 ----
 
     [Fact]
-    public void MaximizedState_KeepsNoOuterGapCompensation()
+    public void MaximizedState_CompensatesOnlyMeasuredNativeFrame()
     {
         var xaml = File.ReadAllText(FindRepositoryFile(Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml")));
         var code = File.ReadAllText(FindRepositoryFile(Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml.cs")));
         var area = File.ReadAllText(FindRepositoryFile(Path.Combine(
             "AIGeekTuner", "Views", "Behaviors", "WindowMaximizeWorkArea.cs")));
 
-        // 根布局没有 margin/padding 补偿；最大化完全依赖 work area 语义。
+        // XAML 根布局不带静态 margin 补偿；补偿只由 StateChanged 按实测
+        // frame 写入，Normal 状态恢复零边距。
         Assert.DoesNotContain("<Grid Margin", xaml);
+        Assert.Contains("UpdateMaximizedFrameMargin", code);
         Assert.DoesNotContain("SystemParameters.WindowResizeBorderThickness", code);
         Assert.DoesNotContain("Thickness(-", code);
-        // 使用 rcWork 而不是整屏 rcMonitor。
+        // 使用 rcWork / GetWindowRect 实测，不硬编码 frame 或任务栏高度。
         Assert.Contains("RcWork", area);
+        Assert.Contains("GetWindowRect", area);
+    }
+
+    [Theory]
+    [InlineData(0, 0, 2560, 1528, -11, -11, 2571, 1539, 1.5, 1.5, 7.333333333333333, 7.333333333333333)]
+    [InlineData(0, 0, 1920, 1040, 0, 0, 1920, 1040, 1.0, 1.0, 0.0, 0.0)]
+    public void FrameMargin_MeasuresNativeFrameInset(
+        int wl, int wt, int wr, int wb,
+        int vl, int vt, int vr, int vb,
+        double dpiX, double dpiY,
+        double expectedLeft, double expectedTop)
+    {
+        var work = new WindowMaximizeWorkArea.NativeRect { Left = wl, Top = wt, Right = wr, Bottom = wb };
+        var window = new WindowMaximizeWorkArea.NativeRect { Left = vl, Top = vt, Right = vr, Bottom = vb };
+
+        var margin = WindowMaximizeWorkArea.FrameMargin(window, work, dpiX, dpiY);
+
+        Assert.Equal(expectedLeft, margin.Left, 6);
+        Assert.Equal(expectedTop, margin.Top, 6);
+        Assert.Equal(expectedLeft, margin.Right, 6);
+        Assert.Equal(expectedTop, margin.Bottom, 6);
     }
 
     // ---- 真窗口 STA：完整外壳契约（单窗口单线程顺序推进）----
@@ -148,16 +171,21 @@ public sealed class WindowShellBehaviorTests
                 Assert.True((style & WsMinimizeBox) != 0, "WS_MINIMIZEBOX missing");
                 Assert.True((style & WsMaximizeBox) != 0, "WS_MAXIMIZEBOX missing");
 
-                // (2)(5) 最大化 = 精确填充当前显示器工作区：左右上边缘无白缝，
-                // 底部不得越过工作区（任务栏遮挡回归锁）。
+                // (2)(5) 最大化 = 可见内容精确填充当前显示器工作区：SingleBorder
+                // 窗口 rect 会被系统外扩隐藏 frame，由根布局 margin 补偿回来；
+                // 断言对象是根内容在屏幕上的物理 bounds。
                 WindowChromeController.ToggleMaximize(window);
-                var rect = WaitForWindowRect(hwnd, r =>
-                    r.Left == work.Left && r.Top == work.Top && r.Right == work.Right);
-                Assert.Equal(work.Left, rect.Left);
-                Assert.Equal(work.Top, rect.Top);
-                Assert.Equal(work.Right, rect.Right);
-                Assert.True(rect.Bottom <= work.Bottom,
-                    $"maximized bottom {rect.Bottom} overlaps taskbar (work bottom {work.Bottom})");
+                WaitForWindowRect(hwnd, r => r.Right > r.Left && r.Bottom > r.Top);
+                window.Dispatcher.Invoke(DispatcherPriority.ContextIdle, new Action(() => { }));
+                var root = Assert.IsType<System.Windows.Controls.Grid>(window.Content);
+                var contentTl = root.PointToScreen(new Point(0, 0));
+                var contentBr = root.PointToScreen(new Point(root.ActualWidth, root.ActualHeight));
+                Assert.Equal(work.Left, (int)Math.Round(contentTl.X));
+                Assert.Equal(work.Top, (int)Math.Round(contentTl.Y));
+                Assert.Equal(work.Right, (int)Math.Round(contentBr.X));
+                // 任务栏遮挡回归锁：内容底部不得超过工作区底部。
+                Assert.True(contentBr.Y <= work.Bottom,
+                    $"maximized content bottom {contentBr.Y} overlaps taskbar (work bottom {work.Bottom})");
                 Assert.Equal(WindowState.Maximized, window.WindowState);
 
                 // (7)(8) 任务栏点击 = shell 发送标准 SC_MINIMIZE / SC_RESTORE。

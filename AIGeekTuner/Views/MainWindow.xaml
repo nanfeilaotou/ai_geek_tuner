@@ -7,7 +7,7 @@
         Icon="pack://application:,,,/AIGeekTuner;component/Assets/AppIcon.ico"
         MinHeight="680" MinWidth="1024"
         WindowStartupLocation="CenterScreen"
-        WindowStyle="None"
+        WindowStyle="SingleBorderWindow"
         ResizeMode="NoResize"
         Background="{DynamicResource AppBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
