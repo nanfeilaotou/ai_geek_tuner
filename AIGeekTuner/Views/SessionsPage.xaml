@@ -40,6 +40,20 @@
                     <Button Content="历史记录"
                             Command="{Binding OpenHistoryViewCommand}"
                             Style="{StaticResource SecondaryButtonStyle}" Padding="16,7" MinWidth="100"/>
+                    <Button Content="导出报告"
+                            Command="{Binding ExportSessionReportCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}" Padding="14,7" MinWidth="90"
+                            Margin="10,0,0,0"
+                            Visibility="{Binding IsDetailMode, Converter={StaticResource BoolToVis}}"/>
+                    <Button Content="导出证据包"
+                            Command="{Binding ExportEvidencePackageCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}" Padding="14,7" MinWidth="100"
+                            Margin="8,0,0,0"
+                            Visibility="{Binding IsDetailMode, Converter={StaticResource BoolToVis}}"/>
+                    <TextBlock Text="{Binding ExportStatusMessage}"
+                               Foreground="#C9F5E1" FontSize="11"
+                               VerticalAlignment="Center" Margin="12,0,0,0"
+                               Visibility="{Binding HasExportStatus, Converter={StaticResource BoolToVis}}"/>
                 </StackPanel>
             </Border>
 

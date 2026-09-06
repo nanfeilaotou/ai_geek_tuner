@@ -96,7 +96,8 @@ namespace AIGeekTuner
             // 尽早启动唯一一次 static inventory collection；ViewModel 后续复用
             // 同一 in-flight task，不与 telemetry provider 建立依赖。
             _ = inventoryService.CollectAsync();
-            _filePickerService = new OpenFileDialogService();
+            var fileDialogs = new OpenFileDialogService();
+            _filePickerService = fileDialogs;
             _fileReaderService = new FileReaderService();
             _confirmationDialogService = new MessageBoxConfirmationDialogService();
             _reportExportService = new MarkdownReportExportService(
@@ -185,12 +186,6 @@ namespace AIGeekTuner
                 async providerId => await providerCredentialStore.LoadAsync(providerId) is not null);
             _aiProviderSettingsViewModel = aiProviderSettingsViewModel;
 
-            _settingsViewModel = new SettingsViewModel(
-                _applicationSettingsService,
-                ConfigurationStore,
-                _localDataDirectoryService,
-                _telemetryHub,
-                aiProviderSettingsViewModel);
             _liveTelemetryCoordinator = liveTelemetry;
             // V2-M3：Session AI（复用现有 HttpClient 与配置快照原则）+ GPT-SoVITS。
             // 注意：须在 ConfigurationStore/_applicationSettingsService 赋值之后创建，
@@ -215,6 +210,25 @@ namespace AIGeekTuner
             var incidentCorrelation = new SessionIncidentCorrelationService(
                 new WindowsEventLogIncidentSource(new WindowsEventRecordReader()),
                 incidentStore);
+            var sessionExportService = new SessionExportService(
+                sessionStore,
+                analysisStore,
+                incidentStore);
+            _settingsViewModel = new SettingsViewModel(
+                _applicationSettingsService,
+                ConfigurationStore,
+                _localDataDirectoryService,
+                _telemetryHub,
+                aiProviderSettingsViewModel,
+                fileDialogs,
+                new ApplicationSettingsPortabilityService(
+                    _applicationSettingsService,
+                    applicationDataPaths.SettingsFilePath),
+                new AiProviderConfigurationPortabilityService(
+                    aiProviderStore,
+                    providerCredentialStore,
+                    applicationDataPaths.AiProvidersFilePath),
+                _confirmationDialogService);
             var voiceHttpClient = new HttpClient();
             var voiceService = new GptSoVitsVoiceSynthesisService(voiceHttpClient);
             var wavPlayback = new SoundPlayerWavPlaybackService();
@@ -242,7 +256,9 @@ namespace AIGeekTuner
                 wavPlayback,
                 voiceSnapshot,
                 incidentCorrelation,
-                incidentStore);
+                incidentStore,
+                sessionExportService,
+                fileDialogs);
 
             var safetyService = new SafetyGuardService();
             // V2-M5.1B.2：诊断请求经 AiChatRuntime 走当前 Provider；

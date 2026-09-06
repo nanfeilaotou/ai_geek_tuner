@@ -63,6 +63,22 @@ public class PageConstructionSmokeTests
             "页面构造失败：" + failure?.GetType().Name + " | " + failure?.Message);
     }
 
+    [Fact]
+    public void ExportActions_ArePresentWithoutChangingPageStructure()
+    {
+        var settings = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "SettingsPage.xaml")));
+        var sessions = File.ReadAllText(FindRepositoryFile(
+            Path.Combine("AIGeekTuner", "Views", "SessionsPage.xaml")));
+
+        Assert.Contains("导出应用设置", settings);
+        Assert.Contains("导入应用设置", settings);
+        Assert.Contains("导出 Provider 配置", settings);
+        Assert.Contains("导入 Provider 配置", settings);
+        Assert.Contains("导出报告", sessions);
+        Assert.Contains("导出证据包", sessions);
+    }
+
     /// <summary>
     /// V2-M5.1A Gate O：设置页 Provider 卡片布局冒烟。
     /// 挂上完整 ViewModel（含 Provider 卡片），输入超长 BaseUrl / 模型 ID 后
@@ -299,5 +315,23 @@ public class PageConstructionSmokeTests
                     UriKind.Absolute)
             });
         }
+    }
+
+    private static string FindRepositoryFile(string relativePath)
+    {
+        var candidate = AppContext.BaseDirectory;
+        for (var i = 0; i < 6; i++)
+        {
+            var path = Path.GetFullPath(Path.Combine(candidate, relativePath));
+            if (File.Exists(path))
+            {
+                return path;
+            }
+
+            candidate = Directory.GetParent(candidate)?.FullName
+                ?? throw new DirectoryNotFoundException(candidate);
+        }
+
+        throw new FileNotFoundException(relativePath);
     }
 }

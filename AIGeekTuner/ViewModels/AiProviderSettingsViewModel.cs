@@ -427,6 +427,13 @@ namespace AIGeekTuner.ViewModels
         /// <summary>密钥输入框需要被清空时通知视图（PasswordBox 无法从 VM 直接清空）。</summary>
         public event Action? ApiKeyInputReset;
 
+        /// <summary>显式导入 Provider 配置后重读持久化快照，保留当前选择（若仍存在）。</summary>
+        public void ReloadFromPersistence()
+        {
+            var selectedId = SelectedItem?.ExistingProfileId;
+            ReloadProfiles(selectedId);
+        }
+
         // ============================================================
         // 选择 / 草稿加载
         // ============================================================

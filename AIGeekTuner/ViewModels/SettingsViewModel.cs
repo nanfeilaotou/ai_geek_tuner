@@ -2,7 +2,9 @@ using System.Collections.ObjectModel;
 using System.Windows.Input;
 using AIGeekTuner.Commands;
 using AIGeekTuner.Configuration;
+using AIGeekTuner.Services.AI.Providers.Configuration;
 using AIGeekTuner.Services.Diagnostics;
+using AIGeekTuner.Services.Dialogs;
 using AIGeekTuner.Services.Settings;
 using AIGeekTuner.Services.Telemetry;
 
@@ -26,6 +28,10 @@ namespace AIGeekTuner.ViewModels
         private readonly DiagnosticConfigurationStore _configurationStore;
         private readonly ILocalDataDirectoryService _localDataDirectoryService;
         private readonly ITelemetryHub? _telemetryHub;
+        private readonly IFileDialogService? _fileDialogs;
+        private readonly IConfirmationDialogService? _confirmationDialog;
+        private readonly ApplicationSettingsPortabilityService? _settingsPortability;
+        private readonly AiProviderConfigurationPortabilityService? _providerPortability;
 
         private readonly AsyncRelayCommand _refreshDataSourcesCommand;
 
@@ -34,6 +40,10 @@ namespace AIGeekTuner.ViewModels
         private string _dataSourceStatusLine = "正在检测硬件数据源...";
 
         private readonly AsyncRelayCommand _saveCommand;
+        private readonly AsyncRelayCommand _exportSettingsCommand;
+        private readonly AsyncRelayCommand _importSettingsCommand;
+        private readonly AsyncRelayCommand _exportProvidersCommand;
+        private readonly AsyncRelayCommand _importProvidersCommand;
 
         // V2-M5.1B（Gate N）：旧 Ollama 专属的 BaseUrl / 模型 / 刷新模型 / 测试连接
         // 已从用户可见 UI 移除——由“AI 服务提供方”卡片的 Provider 配置取代。
@@ -52,12 +62,20 @@ namespace AIGeekTuner.ViewModels
             DiagnosticConfigurationStore configurationStore,
             ILocalDataDirectoryService localDataDirectoryService,
             ITelemetryHub? telemetryHub = null,
-            AiProviderSettingsViewModel? providers = null)
+            AiProviderSettingsViewModel? providers = null,
+            IFileDialogService? fileDialogs = null,
+            ApplicationSettingsPortabilityService? settingsPortability = null,
+            AiProviderConfigurationPortabilityService? providerPortability = null,
+            IConfirmationDialogService? confirmationDialog = null)
         {
             _settingsService = settingsService ?? throw new ArgumentNullException(nameof(settingsService));
             _configurationStore = configurationStore ?? throw new ArgumentNullException(nameof(configurationStore));
             _localDataDirectoryService = localDataDirectoryService ?? throw new ArgumentNullException(nameof(localDataDirectoryService));
             _telemetryHub = telemetryHub;
+            _fileDialogs = fileDialogs;
+            _confirmationDialog = confirmationDialog;
+            _settingsPortability = settingsPortability;
+            _providerPortability = providerPortability;
 
             // V2-M5.1A：Provider 配置卡片（“当前使用”Provider 决定真实 AI runtime）。
             Providers = providers ?? AiProviderSettingsViewModel.CreateUnavailable();
@@ -76,6 +94,10 @@ namespace AIGeekTuner.ViewModels
                 "0.0##", System.Globalization.CultureInfo.InvariantCulture);
 
             _saveCommand = new AsyncRelayCommand(SaveAsync, () => !IsSaving);
+            _exportSettingsCommand = new AsyncRelayCommand(ExportSettingsAsync, () => !IsSaving);
+            _importSettingsCommand = new AsyncRelayCommand(ImportSettingsAsync, () => !IsSaving);
+            _exportProvidersCommand = new AsyncRelayCommand(ExportProvidersAsync, () => !IsSaving);
+            _importProvidersCommand = new AsyncRelayCommand(ImportProvidersAsync, () => !IsSaving);
             OpenDataDirectoryCommand = new RelayCommand(OpenDataDirectory);
             _refreshDataSourcesCommand = new AsyncRelayCommand(
                 RefreshDataSourceStatusesAsync,
@@ -193,6 +215,10 @@ namespace AIGeekTuner.ViewModels
                 if (SetProperty(ref _isSaving, value))
                 {
                     _saveCommand.NotifyCanExecuteChanged();
+                    _exportSettingsCommand.NotifyCanExecuteChanged();
+                    _importSettingsCommand.NotifyCanExecuteChanged();
+                    _exportProvidersCommand.NotifyCanExecuteChanged();
+                    _importProvidersCommand.NotifyCanExecuteChanged();
                 }
             }
         }
@@ -211,6 +237,14 @@ namespace AIGeekTuner.ViewModels
 
         public AsyncRelayCommand SaveCommand => _saveCommand;
 
+        public AsyncRelayCommand ExportSettingsCommand => _exportSettingsCommand;
+
+        public AsyncRelayCommand ImportSettingsCommand => _importSettingsCommand;
+
+        public AsyncRelayCommand ExportProvidersCommand => _exportProvidersCommand;
+
+        public AsyncRelayCommand ImportProvidersCommand => _importProvidersCommand;
+
         public RelayCommand OpenDataDirectoryCommand { get; }
 
         private async Task SaveAsync()
@@ -227,18 +261,7 @@ namespace AIGeekTuner.ViewModels
                 // 先写盘（服务内部再次权威校验），成功后才换入运行时快照。
                 // V2-M5.1B（Gate N）：旧 Ollama 字段不再来自 UI——保存时原样带回旧值，保持升级兼容。
                 await _settingsService.SaveAsync(settings);
-                _configurationStore.Replace(new DiagnosticConfiguration(
-                    new OllamaOptions
-                    {
-                        BaseUrl = settings.OllamaBaseUrl,
-                        ModelName = settings.OllamaModelName,
-                        TimeoutSeconds = settings.OllamaTimeoutSeconds,
-                        UseJsonFormat = settings.UseJsonFormat
-                    },
-                    new DiagnosisInputOptions
-                    {
-                        MaxFaultLogCharacters = settings.MaxFaultLogCharacters
-                    }));
+                ReplaceRuntimeConfiguration(settings);
 
                 SetStatus(SettingsStatusKind.Success, "设置已保存，下一次诊断立即生效。");
             }
@@ -256,6 +279,222 @@ namespace AIGeekTuner.ViewModels
                 IsSaving = false;
             }
         }
+
+        private async Task ExportSettingsAsync()
+        {
+            if (_settingsPortability is null || _fileDialogs is null)
+            {
+                SetStatus(SettingsStatusKind.Warning, "设置导出在此环境未启用。");
+                return;
+            }
+
+            var path = _fileDialogs.PickSaveFile(
+                "导出应用设置",
+                "AIGeekTuner 设置 (*.json)|*.json|JSON 文件 (*.json)|*.json",
+                "AIGeekTuner_Settings_v1.json");
+            if (path is null)
+            {
+                return;
+            }
+
+            IsSaving = true;
+            try
+            {
+                await _settingsPortability.ExportAsync(path);
+                SetStatus(SettingsStatusKind.Success, "应用设置已导出；Provider 凭据不包含在此文件中。");
+            }
+            catch (SettingsPortabilityException exception)
+            {
+                SetStatus(SettingsStatusKind.Error, exception.Message);
+                ExceptionLogWriter.Write(exception, "Settings export");
+            }
+            catch (Exception exception)
+            {
+                SetStatus(SettingsStatusKind.Error, "应用设置导出失败，请稍后重试。");
+                ExceptionLogWriter.Write(exception, "Settings export");
+            }
+            finally
+            {
+                IsSaving = false;
+            }
+        }
+
+        private async Task ImportSettingsAsync()
+        {
+            if (_settingsPortability is null || _fileDialogs is null)
+            {
+                SetStatus(SettingsStatusKind.Warning, "设置导入在此环境未启用。");
+                return;
+            }
+
+            var path = _fileDialogs.PickOpenFile(
+                "导入应用设置",
+                "AIGeekTuner 设置 (*.json)|*.json|JSON 文件 (*.json)|*.json");
+            if (path is null)
+            {
+                return;
+            }
+
+            if (!Confirm("导入应用设置", "导入将更新当前应用设置，是否继续？"))
+            {
+                return;
+            }
+
+            IsSaving = true;
+            try
+            {
+                var result = await _settingsPortability.ImportAsync(path);
+                ApplySettingsToDraft(result.Settings);
+                ReplaceRuntimeConfiguration(result.Settings);
+                var warning = result.Warnings.Count == 0
+                    ? string.Empty
+                    : " " + string.Join(" ", result.Warnings);
+                SetStatus(SettingsStatusKind.Success, "应用设置已导入并保存。" + warning);
+            }
+            catch (SettingsPortabilityException exception)
+            {
+                SetStatus(SettingsStatusKind.Error, exception.Message);
+                ExceptionLogWriter.Write(exception, "Settings import");
+            }
+            catch (Exception exception)
+            {
+                SetStatus(SettingsStatusKind.Error, "应用设置导入失败，当前设置未改变。");
+                ExceptionLogWriter.Write(exception, "Settings import");
+            }
+            finally
+            {
+                IsSaving = false;
+            }
+        }
+
+        private async Task ExportProvidersAsync()
+        {
+            if (_providerPortability is null || _fileDialogs is null)
+            {
+                SetStatus(SettingsStatusKind.Warning, "Provider 导出在此环境未启用。");
+                return;
+            }
+
+            var path = _fileDialogs.PickSaveFile(
+                "导出 Provider 配置",
+                "AIGeekTuner Provider (*.json)|*.json|JSON 文件 (*.json)|*.json",
+                "AIGeekTuner_AIProviders_v1.json");
+            if (path is null)
+            {
+                return;
+            }
+
+            IsSaving = true;
+            try
+            {
+                await _providerPortability.ExportAsync(path);
+                SetStatus(SettingsStatusKind.Success, "Provider 配置已导出；API Key 不包含在备份中。");
+            }
+            catch (AiProviderPortabilityException exception)
+            {
+                SetStatus(SettingsStatusKind.Error, exception.Message);
+                ExceptionLogWriter.Write(exception, "Provider export");
+            }
+            catch (Exception exception)
+            {
+                SetStatus(SettingsStatusKind.Error, "Provider 配置导出失败，请稍后重试。");
+                ExceptionLogWriter.Write(exception, "Provider export");
+            }
+            finally
+            {
+                IsSaving = false;
+            }
+        }
+
+        private async Task ImportProvidersAsync()
+        {
+            if (_providerPortability is null || _fileDialogs is null)
+            {
+                SetStatus(SettingsStatusKind.Warning, "Provider 导入在此环境未启用。");
+                return;
+            }
+
+            var path = _fileDialogs.PickOpenFile(
+                "导入 Provider 配置",
+                "AIGeekTuner Provider (*.json)|*.json|JSON 文件 (*.json)|*.json");
+            if (path is null)
+            {
+                return;
+            }
+
+            if (!Confirm("导入 Provider 配置", "将合并 Provider 配置，不会导入或删除 API Key。是否继续？"))
+            {
+                return;
+            }
+
+            IsSaving = true;
+            try
+            {
+                var result = await _providerPortability.ImportAsync(path);
+                Providers.ReloadFromPersistence();
+                var warning = result.MissingCredentialProviderIds.Count == 0
+                    ? string.Empty
+                    : " 缺少 API Key 的 Provider：" + string.Join(", ", result.MissingCredentialProviderIds);
+                SetStatus(SettingsStatusKind.Success, "Provider 配置已合并导入；本机凭据保持不变。" + warning);
+            }
+            catch (AiProviderPortabilityException exception)
+            {
+                SetStatus(SettingsStatusKind.Error, exception.Message);
+                ExceptionLogWriter.Write(exception, "Provider import");
+            }
+            catch (Exception exception)
+            {
+                SetStatus(SettingsStatusKind.Error, "Provider 配置导入失败，当前配置未改变。");
+                ExceptionLogWriter.Write(exception, "Provider import");
+            }
+            finally
+            {
+                IsSaving = false;
+            }
+        }
+
+        private bool Confirm(string title, string message) =>
+            _confirmationDialog?.Confirm(title, message) ?? true;
+
+        private void ApplySettingsToDraft(ApplicationSettings settings)
+        {
+            _timeoutSecondsText = settings.OllamaTimeoutSeconds.ToString();
+            _maxLogLengthText = settings.MaxFaultLogCharacters.ToString("N0");
+            _autoSaveDiagnosisHistory = settings.AutoSaveDiagnosisHistory;
+            RecordingIntervalMs = settings.RecordingIntervalMs;
+            VoiceEnabled = settings.Voice.Enabled;
+            VoiceEndpoint = settings.Voice.Endpoint;
+            VoiceReferenceAudioPath = settings.Voice.ReferenceAudioPath;
+            VoicePromptText = settings.Voice.PromptText;
+            VoicePromptLang = settings.Voice.PromptLang;
+            VoiceSpeedFactorText = settings.Voice.SpeedFactor.ToString(
+                "0.0##", System.Globalization.CultureInfo.InvariantCulture);
+
+            OnPropertyChanged(nameof(TimeoutSecondsText));
+            OnPropertyChanged(nameof(MaxLogLengthText));
+            OnPropertyChanged(nameof(AutoSaveDiagnosisHistory));
+            OnPropertyChanged(nameof(RecordingIntervalMs));
+            OnPropertyChanged(nameof(VoiceEnabled));
+            OnPropertyChanged(nameof(VoiceEndpoint));
+            OnPropertyChanged(nameof(VoiceReferenceAudioPath));
+            OnPropertyChanged(nameof(VoicePromptText));
+            OnPropertyChanged(nameof(VoicePromptLang));
+            OnPropertyChanged(nameof(VoiceSpeedFactorText));
+        }
+
+        private void ReplaceRuntimeConfiguration(ApplicationSettings settings) =>
+            _configurationStore.Replace(new DiagnosticConfiguration(
+                new OllamaOptions
+                {
+                    BaseUrl = settings.OllamaBaseUrl,
+                    ModelName = settings.OllamaModelName,
+                    TimeoutSeconds = settings.OllamaTimeoutSeconds,
+                    UseJsonFormat = settings.UseJsonFormat
+                },
+                new DiagnosisInputOptions
+                {
+                    MaxFaultLogCharacters = settings.MaxFaultLogCharacters
+                }));
 
         private void OpenDataDirectory()
         {

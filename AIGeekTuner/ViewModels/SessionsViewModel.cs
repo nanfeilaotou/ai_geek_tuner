@@ -11,6 +11,8 @@ using AIGeekTuner.Models.Incidents;
 using AIGeekTuner.Models.Sessions;
 using AIGeekTuner.Models.Telemetry;
 using AIGeekTuner.Services.Incidents;
+using AIGeekTuner.Services.Dialogs;
+using AIGeekTuner.Services.Diagnostics;
 using AIGeekTuner.Services.SessionAnalysis;
 using AIGeekTuner.Services.Settings;
 using AIGeekTuner.Services.Voice;
@@ -190,6 +192,8 @@ namespace AIGeekTuner.ViewModels
         private readonly IApplicationSettingsService _settingsService;
         private readonly ISessionIncidentCorrelationService _incidentCorrelation;
         private readonly ISessionIncidentStore _incidentStore;
+        private readonly ISessionExportService? _sessionExportService;
+        private readonly IFileDialogService? _fileDialogs;
 
         private bool _isRecording;
         private bool _hasResult;
@@ -199,6 +203,7 @@ namespace AIGeekTuner.ViewModels
         private string _samplesText = "0";
         private string _intervalText = "2 s";
         private SessionListItem? _selectedRecent;
+        private string _exportStatusMessage = string.Empty;
 
         // ---- V2-M4.5E：页面内部三状态 presentation（Gate B）----
         /// <summary>
@@ -220,6 +225,8 @@ namespace AIGeekTuner.ViewModels
                     OnPropertyChanged(nameof(IsRecordMode));
                     OnPropertyChanged(nameof(IsHistoryMode));
                     OnPropertyChanged(nameof(IsDetailMode));
+                    ExportSessionReportCommand.NotifyCanExecuteChanged();
+                    ExportEvidencePackageCommand.NotifyCanExecuteChanged();
                 }
             }
         }
@@ -238,7 +245,9 @@ namespace AIGeekTuner.ViewModels
             IWavPlaybackService wavPlayback,
             Func<VoiceConfiguration> voiceSnapshot,
             ISessionIncidentCorrelationService incidentCorrelation,
-            ISessionIncidentStore incidentStore)
+            ISessionIncidentStore incidentStore,
+            ISessionExportService? sessionExportService = null,
+            IFileDialogService? fileDialogs = null)
         {
             _recorder = recorder ?? throw new ArgumentNullException(nameof(recorder));
             _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -250,6 +259,8 @@ namespace AIGeekTuner.ViewModels
             _voiceSnapshot = voiceSnapshot ?? throw new ArgumentNullException(nameof(voiceSnapshot));
             _incidentCorrelation = incidentCorrelation ?? throw new ArgumentNullException(nameof(incidentCorrelation));
             _incidentStore = incidentStore ?? throw new ArgumentNullException(nameof(incidentStore));
+            _sessionExportService = sessionExportService;
+            _fileDialogs = fileDialogs;
 
             // M4.5E.3 Gate E：app 在 UI 线程构造 ViewModel → 捕获 Dispatcher 同步上下文；
             // 单元测试/无 WPF 宿主下可能为 null → UI 回退为内联执行（RunOnUiThread）。
@@ -258,6 +269,12 @@ namespace AIGeekTuner.ViewModels
 
             AnalyzeCommand = new AsyncRelayCommand(AnalyzeAsync,
                 () => !IsAnalyzing && CurrentDetailSessionId is not null);
+            ExportSessionReportCommand = new AsyncRelayCommand(
+                ExportSessionReportAsync,
+                () => _sessionExportService is not null && IsDetailMode && CurrentDetailSessionId is not null);
+            ExportEvidencePackageCommand = new AsyncRelayCommand(
+                ExportEvidencePackageAsync,
+                () => _sessionExportService is not null && IsDetailMode && CurrentDetailSessionId is not null);
             PlaySpokenSummaryCommand = new RelayCommand(PlaySpokenSummary, () =>
                 !IsRecording && HasAnalysis && !string.IsNullOrWhiteSpace(SpokenSummary)
                 && VoiceState is VoicePlaybackState.Idle or VoicePlaybackState.Error);
@@ -310,6 +327,8 @@ namespace AIGeekTuner.ViewModels
                     OnPropertyChanged(nameof(HasEmptyState));
                     // V2-M4.5E Gate C/I：录制中头部按钮文案“新建录制”↔“返回当前录制”。
                     OnPropertyChanged(nameof(NewRecordingButtonText));
+                    ExportSessionReportCommand.NotifyCanExecuteChanged();
+                    ExportEvidencePackageCommand.NotifyCanExecuteChanged();
                 }
             }
         }
@@ -323,6 +342,20 @@ namespace AIGeekTuner.ViewModels
 
         /// <summary>Gate I：录制已存在时，页头“新建录制”语义变为“返回当前录制”（唯一导航入口）。</summary>
         public string NewRecordingButtonText => IsRecording ? "返回当前录制" : "新建录制";
+
+        public string ExportStatusMessage
+        {
+            get => _exportStatusMessage;
+            private set
+            {
+                if (SetProperty(ref _exportStatusMessage, value))
+                {
+                    OnPropertyChanged(nameof(HasExportStatus));
+                }
+            }
+        }
+
+        public bool HasExportStatus => !string.IsNullOrWhiteSpace(ExportStatusMessage);
         public bool HasError { get => _hasError; private set => SetProperty(ref _hasError, value); }
         public string ErrorText { get => _errorText; private set => SetProperty(ref _errorText, value); }
         public string ElapsedText { get => _elapsedText; private set => SetProperty(ref _elapsedText, value); }
@@ -356,6 +389,10 @@ namespace AIGeekTuner.ViewModels
         public ObservableCollection<string> Uncertainties { get; } = [];
 
         public AsyncRelayCommand AnalyzeCommand { get; }
+
+        public AsyncRelayCommand ExportSessionReportCommand { get; }
+
+        public AsyncRelayCommand ExportEvidencePackageCommand { get; }
 
         public bool IsAnalyzing
         {
@@ -422,6 +459,8 @@ namespace AIGeekTuner.ViewModels
 
             _currentSessionId = sessionId;
             AnalyzeCommand.NotifyCanExecuteChanged();
+            ExportSessionReportCommand.NotifyCanExecuteChanged();
+            ExportEvidencePackageCommand.NotifyCanExecuteChanged();
             PlaySpokenSummaryCommand.NotifyCanExecuteChanged();
             // M4.5E.2：切换 Detail 会话后，分析/语音的 per-session 显示状态全部重算。
             OnPropertyChanged(nameof(IsCurrentDetailAnalyzing));
@@ -950,6 +989,88 @@ namespace AIGeekTuner.ViewModels
             HasResult = true;
         }
 
+        private async Task ExportSessionReportAsync()
+        {
+            var sessionId = CurrentDetailSessionId;
+            if (_sessionExportService is null || _fileDialogs is null || sessionId is null)
+            {
+                return;
+            }
+
+            var session = _store.Load(sessionId);
+            if (session is null)
+            {
+                ExportStatusMessage = "会话不存在或文件已损坏。";
+                return;
+            }
+
+            var path = _fileDialogs.PickSaveFile(
+                "导出录制报告",
+                "Markdown 报告 (*.md)|*.md|所有文件 (*.*)|*.*",
+                $"AIGeekTuner_Session_{session.StartedAtUtc.ToLocalTime():yyyyMMdd_HHmmss}.md");
+            if (path is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await _sessionExportService.ExportReportAsync(sessionId, path);
+                ExportStatusMessage = "录制报告已导出。";
+            }
+            catch (SessionExportException exception)
+            {
+                ExportStatusMessage = exception.Message;
+                ExceptionLogWriter.Write(exception, "Session report export");
+            }
+            catch (Exception exception)
+            {
+                ExportStatusMessage = "录制报告导出失败，请稍后重试。";
+                ExceptionLogWriter.Write(exception, "Session report export");
+            }
+        }
+
+        private async Task ExportEvidencePackageAsync()
+        {
+            var sessionId = CurrentDetailSessionId;
+            if (_sessionExportService is null || _fileDialogs is null || sessionId is null)
+            {
+                return;
+            }
+
+            var session = _store.Load(sessionId);
+            if (session is null)
+            {
+                ExportStatusMessage = "会话不存在或文件已损坏。";
+                return;
+            }
+
+            var path = _fileDialogs.PickSaveFile(
+                "导出录制证据包",
+                "ZIP 证据包 (*.zip)|*.zip|所有文件 (*.*)|*.*",
+                $"AIGeekTuner_Evidence_{session.StartedAtUtc.ToLocalTime():yyyyMMdd_HHmmss}.zip");
+            if (path is null)
+            {
+                return;
+            }
+
+            try
+            {
+                await _sessionExportService.ExportEvidencePackageAsync(sessionId, path);
+                ExportStatusMessage = "证据包已导出（未包含 voice.wav、设置或凭据）。";
+            }
+            catch (SessionExportException exception)
+            {
+                ExportStatusMessage = exception.Message;
+                ExceptionLogWriter.Write(exception, "Session evidence export");
+            }
+            catch (Exception exception)
+            {
+                ExportStatusMessage = "证据包导出失败，请稍后重试。";
+                ExceptionLogWriter.Write(exception, "Session evidence export");
+            }
+        }
+
         public async Task AnalyzeAsync()
         {
             // M4.5E.2 Gate B：开始时捕获目标会话，本次 operation（上下文/请求/持久化/渲染）
@@ -1440,6 +1561,3 @@ namespace AIGeekTuner.ViewModels
                 : string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{duration.Minutes:00}:{duration.Seconds:00}");
     }
 }
-
-
-

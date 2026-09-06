@@ -558,6 +558,16 @@
                                 Style="{StaticResource TechButtonStyle}"
                                 Padding="22,9" FontWeight="Bold"/>
                     </Grid>
+                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                        <Button Content="导出 Provider 配置"
+                                Command="{Binding ExportProvidersCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Padding="14,7" Margin="0,0,8,0"/>
+                        <Button Content="导入 Provider 配置"
+                                Command="{Binding ImportProvidersCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Padding="14,7"/>
+                    </StackPanel>
                 </StackPanel>
             </Border>
 
@@ -789,6 +799,16 @@
                                     Style="{StaticResource SecondaryButtonStyle}"
                                     Padding="16,8" Margin="0,10,0,0"
                                     HorizontalAlignment="Left"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="导出应用设置"
+                                        Command="{Binding ExportSettingsCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="14,7" Margin="0,0,8,0"/>
+                                <Button Content="导入应用设置"
+                                        Command="{Binding ImportSettingsCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Padding="14,7"/>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
 
