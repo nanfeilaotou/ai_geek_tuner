@@ -8,7 +8,7 @@
         MinHeight="680" MinWidth="1024"
         WindowStartupLocation="CenterScreen"
         WindowStyle="SingleBorderWindow"
-        ResizeMode="NoResize"
+        ResizeMode="CanResize"
         Background="{DynamicResource AppBackgroundBrush}"
         FontFamily="Microsoft YaHei UI"
         UseLayoutRounding="True" SnapsToDevicePixels="True"

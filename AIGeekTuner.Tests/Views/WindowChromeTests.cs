@@ -28,7 +28,7 @@ public sealed class WindowChromeTests
             Path.Combine("AIGeekTuner", "Views", "MainWindow.xaml")));
 
         Assert.Contains("WindowStyle=\"SingleBorderWindow\"", xaml);
-        Assert.Contains("ResizeMode=\"NoResize\"", xaml);
+        Assert.Contains("ResizeMode=\"CanResize\"", xaml);
         Assert.Contains("shell:WindowChrome.WindowChrome", xaml);
         Assert.Contains("ResizeBorderThickness=\"0\"", xaml);
         Assert.Contains("CornerRadius=\"8\"", xaml);
@@ -80,7 +80,7 @@ public sealed class WindowChromeTests
                 EnsureThemeResources();
                 var window = new MainWindow();
                 Assert.Equal(WindowStyle.SingleBorderWindow, window.WindowStyle);
-                Assert.Equal(ResizeMode.NoResize, window.ResizeMode);
+                Assert.Equal(ResizeMode.CanResize, window.ResizeMode);
                 Assert.Equal(1024, window.MinWidth);
                 Assert.Equal(680, window.MinHeight);
                 Assert.Equal(1180, window.Width);
