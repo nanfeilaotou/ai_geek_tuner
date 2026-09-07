@@ -131,4 +131,4 @@ dotnet run --project AIGeekTuner/AIGeekTuner.csproj
 - 不执行任何 BIOS / 超频 / 电压修改操作
 - 不解析 Minidump 二进制文件
 - AI 可能判断错误：请结合 confidence、事实与推测分区自行判断
-- V2 后续模块（Recorder / PresentMon 会话 / 语音总结等）尚未实现
+- v2.0 已包含 Recorder、Windows Incident evidence、Session Markdown/Evidence ZIP、Settings v2 与 Provider v1 portability；PresentMon 专用会话集成不属于当前版本

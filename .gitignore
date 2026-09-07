@@ -1,12 +1,25 @@
 .vs/
-[Bb]in/
-[Oo]bj/
+**/bin/
+**/obj/
+TestResults/
+coverage/
+coverage-report/
+artifacts/
+**/.cache/
+*.trx
+*.coverage
+*.coveragexml
+*.dmp
+*.mdmp
 *.user
 *.suo
-*.log
 *.tmp
-TestResults/
-artifacts/
+
+# 应用本地运行数据与发布 staging
+credentials.json
+settings.local.json
+logs/
+crash/
 /publish/
 
 # 本地开发辅助与课程过程资料
