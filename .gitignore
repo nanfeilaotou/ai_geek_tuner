@@ -21,6 +21,11 @@ settings.local.json
 logs/
 crash/
 /publish/
+/docs/AI_HANDOFF.md
+/AIGeekTuner_Settings_v*.json
+/AIGeekTuner_AIProviders_v*.json
+/AIGeekTuner_Evidence_*.zip
+/AIGeekTuner_Session_*.md
 
 # 本地开发辅助与课程过程资料
 /.agents/
