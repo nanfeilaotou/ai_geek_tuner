@@ -341,7 +341,7 @@ public class SettingsAutoSaveTests : IDisposable
 
         public List<ApplicationSettings> SavedValues { get; } = [];
 
-        public TaskCompletionSource? GateSave;
+        public TaskCompletionSource? GateSave { get; set; }
 
         public void Load(ApplicationSettings settings)
         {

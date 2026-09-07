@@ -65,6 +65,7 @@ namespace AIGeekTuner
         private readonly AiProviderSettingsViewModel _aiProviderSettingsViewModel;
         private readonly double _normalWidth;
         private readonly double _normalHeight;
+        private bool _firstChromeRefreshDone;
         private WindowChromeHitTestRouter? _windowChromeHitTestRouter;
 
         /// <summary>运行时配置中心；设置页保存后整体换入新快照。</summary>
@@ -327,8 +328,52 @@ namespace AIGeekTuner
         private void Window_ContentRendered(object? sender, EventArgs e)
         {
             StartupBreadcrumbLogger.Write("CONTENT_RENDERED");
+            RunFirstChromeRefresh();
             StartupBreadcrumbLogger.Write("READY");
         }
+
+        /// <summary>M5.2D.1：首帧 chrome 刷新是否已完成（one-shot 守卫）。</summary>
+        internal bool FirstChromeRefreshCompleted => _firstChromeRefreshDone;
+
+        /// <summary>
+        /// M5.2D.1：WindowChrome 首帧渲染竞态修复。SingleBorderWindow 下 HWND
+        /// 在 SourceInitialized 阶段被改写 GWL_STYLE（任务栏状态位），首帧可能
+        /// 仍携带旧的非客户区计算结果（系统标题栏残影 / 原生 caption 按钮），
+        /// 直到鼠标 hover 触发重绘才恢复。ContentRendered 意味着最终样式、
+        /// WindowChrome、圆角、图标与首份内容都已就绪——此刻做一次全量 WPF
+        /// 布局失效即可让首帧以最终 chrome 呈现。严格 one-shot：执行一次后
+        /// 取消订阅，禁止在 Activated / hover / StateChanged 反复刷新。
+        /// </summary>
+        internal void RunFirstChromeRefresh()
+        {
+            if (_firstChromeRefreshDone)
+            {
+                return;
+            }
+
+            // HWND 未就绪时静默跳过（不消费 one-shot），等后续事件再试。
+            if (new System.Windows.Interop.WindowInteropHelper(this).Handle == IntPtr.Zero)
+            {
+                return;
+            }
+
+            _firstChromeRefreshDone = true;
+            ContentRendered -= Window_ContentRendered;
+
+            try
+            {
+                InvalidateArrange();
+                InvalidateVisual();
+                UpdateLayout();
+            }
+            catch (Exception exception)
+            {
+                // 刷新失败绝不影响启动：残影只停留到下一次正常重绘。
+                Services.Diagnostics.ExceptionLogWriter.Write(
+                    exception, "First chrome refresh");
+            }
+        }
+
 
         private void Window_StateChanged(object? sender, EventArgs e)
         {
